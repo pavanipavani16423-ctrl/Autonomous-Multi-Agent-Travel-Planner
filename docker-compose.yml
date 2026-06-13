@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  travel-planner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: travel-planner-app
+    ports:
+      - "8501:8501"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-demo}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-demo}
+      - AMADEUS_API_KEY=${AMADEUS_API_KEY:-demo}
+      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET:-demo}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8501
+      - DEBUG=False
+      - CHROMA_PERSIST_DIR=/app/chroma_db
+      - LLM_MODEL=llama-3.3-70b-versatile
+      - LLM_TEMPERATURE=0.3
+      - LLM_MAX_TOKENS=4096
+    volumes:
+      - chroma_data:/app/chroma_db
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - travel-network
+
+volumes:
+  chroma_data:
+    driver: local
+
+networks:
+  travel-network:
+    driver: bridge
