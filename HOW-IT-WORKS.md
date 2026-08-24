@@ -344,7 +344,78 @@ improve.
 
 ---
 
-## 9. Known rough edges
+## 9. Improving the prompts (the "self-improving" part)
+
+The instructions we send the AI are called prompts. Changing a word can make
+plans noticeably better or noticeably worse, and you usually cannot tell by
+reading — only by measuring.
+
+The original goal was a system that **rewrites its own prompts**: try a
+change, score it, keep it if the score improves. We built one half of that and
+deliberately left the other half out.
+
+### What exists: you can prove whether a change helped
+
+Every prompt version has a number. It sits at the top of
+`prompts/prompts.py`:
+
+```python
+PROMPT_VERSION = "v3"
+```
+
+Every plan records which version produced it, along with its scores. So:
+
+```bash
+python -m eval.harness --compare
+```
+
+gives you a table — one row per version, showing how complete the plans were,
+whether summaries worked, how well grounded they were, how long they took.
+"Did my change help?" becomes a number instead of an opinion.
+
+**The workflow for changing a prompt:**
+
+1. Run `python -m eval.harness` first, so you know the current state
+2. Edit the prompt
+3. Bump `PROMPT_VERSION` (v3 → v4)
+4. Run the harness again
+5. Compare with `--compare`
+6. Better → keep it. Worse → revert. The gate blocks obvious breakage either
+   way
+
+That loop is genuinely the valuable part. It has already caught two real bugs
+that had been silently broken for a long time.
+
+### What does NOT exist: the AI rewriting its own prompts
+
+No automatic rewriting, and no automatic releasing. That was a decision, not
+something unfinished.
+
+**Why not:**
+
+- **Nothing tells us a plan was actually good.** No user ever says "this
+  itinerary was useful." Without that signal, an automatic optimiser just
+  drifts toward whatever the scoring happens to reward — which is not the same
+  as being helpful to a traveller.
+- **Our scores are too few and too coarse to optimise against.** Six pass/fail
+  checks. An optimiser would find ways to satisfy them that a person would
+  consider cheating.
+- **Shipping unreviewed prompt changes is a liability.** A prompt is what
+  makes the system behave sensibly and safely. Changing it automatically, with
+  nobody reading the change, is how a system quietly starts producing
+  confident nonsense at 3am.
+
+**When it would become a good idea:** once real users can rate plans, or once
+you can see which plans people actually booked from. Then there is a real
+signal to optimise toward, and automatic tuning starts being an improvement
+rather than a drift.
+
+Until then: measure automatically, change by hand. That is a normal, sane
+place for a system this size to sit — not a missing feature.
+
+---
+
+## 10. Known rough edges
 
 Nothing here is hidden; it's all worth knowing.
 
@@ -358,10 +429,11 @@ Nothing here is hidden; it's all worth knowing.
   live code is in the folders. **Editing the top-level copies does nothing.**
 - **`evaluation.py` and `langfuse_config.py` are dead too.**
 - **Faithfulness is low** — see section 8.
+- **Prompts are improved by hand, not automatically** — see section 9.
 
 ---
 
-## 10. Running it
+## 11. Running it
 
 ```bash
 pip install -r requirements.txt
