@@ -36,10 +36,10 @@ from typing import List, Optional
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from loguru import logger
 
 import sys
@@ -105,6 +105,67 @@ def filter_by_destination(documents: List[Document], destination: str) -> List[D
             f"({', '.join(sorted(set(dropped)))}) for '{destination}'"
         )
     return kept
+
+
+# ══════════════════════════════════════════════════════════════
+# SECTION 0b — Embeddings
+# ══════════════════════════════════════════════════════════════
+# The embedding model is all-MiniLM-L6-v2 either way. What differs is the
+# runtime used to execute it:
+#
+#   sentence-transformers -> pulls in PyTorch. Measured resident set for the
+#                            whole app: 1,025 MB, and a ~2 GB install.
+#   ONNX (chromadb's own) -> the same 22M-parameter model, no torch at all.
+#
+# Half a gigabyte of PyTorch to run a small embedding model is a poor trade
+# on a 1 GB host, so ONNX is the default and torch is only used if the ONNX
+# runtime is unavailable. Both produce 384-dim L2-normalised vectors, so the
+# cosine distances the index is built on are unchanged — but an index built
+# by one MUST be queried by the same one, so switching means re-indexing.
+
+_embeddings_instance = None
+
+
+class OnnxMiniLMEmbeddings(Embeddings):
+    """LangChain Embeddings adapter over chromadb's bundled ONNX MiniLM."""
+
+    def __init__(self) -> None:
+        from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
+        self._fn = ONNXMiniLM_L6_V2()
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [[float(x) for x in vec] for vec in self._fn(list(texts))]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed_documents([text])[0]
+
+
+def get_embeddings():
+    """
+    Return the embedding function, cached for the process.
+
+    Falls back to sentence-transformers only if ONNX cannot start, so a
+    machine without onnxruntime still works — just heavier.
+    """
+    global _embeddings_instance
+    if _embeddings_instance is not None:
+        return _embeddings_instance
+
+    try:
+        _embeddings_instance = OnnxMiniLMEmbeddings()
+        logger.info("[RAG] Embeddings: ONNX MiniLM-L6-v2 (no torch)")
+    except Exception as e:
+        logger.warning(
+            f"[RAG] ONNX embeddings unavailable ({e}) — falling back to "
+            "sentence-transformers, which loads PyTorch"
+        )
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        _embeddings_instance = HuggingFaceEmbeddings(
+            model_name=rag_config.embedding_model,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+    return _embeddings_instance
 
 
 # ══════════════════════════════════════════════════════════════
@@ -273,11 +334,7 @@ def build_vector_store(documents: List[Document]) -> Chroma:
     384-dimension model, fast inference, good semantic understanding,
     runs entirely locally (no API cost for embeddings).
     """
-    embeddings = HuggingFaceEmbeddings(
-        model_name=rag_config.embedding_model,
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},  # L2 norm → cosine sim
-    )
+    embeddings = get_embeddings()
 
     persist_dir = rag_config.persist_dir
 
@@ -841,6 +898,8 @@ def get_retriever() -> HybridRetriever:
 
 __all__ = [
     "HybridRetriever",
+    "get_embeddings",
+    "OnnxMiniLMEmbeddings",
     "GENERAL_KNOWLEDGE",
     "filter_by_destination",
     "RetrievalResult",

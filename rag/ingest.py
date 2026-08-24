@@ -521,8 +521,17 @@ def check_grounding(sample: int = 6) -> int:
         return 1
 
     indexed = covered[:sample]
-    # Real places that are deliberately not in the default list.
-    absent = ["Tashkent", "Asuncion", "Windhoek", "Chisinau"][:sample]
+
+    # Derive the negatives from the corpus rather than hardcoding them.
+    # A fixed list rots the moment someone ingests one of those cities, and
+    # then the harness fails for a correct system - which is worse than no
+    # harness, because it trains you to ignore it.
+    candidates = ["Asuncion", "Windhoek", "Chisinau", "Tirana", "Ulaanbaatar",
+                  "Podgorica", "Gaborone", "Paramaribo", "Bishkek", "Nouakchott"]
+    covered_keys = {_destination_key(c) for c in covered}
+    absent = [c for c in candidates if _destination_key(c) not in covered_keys][:sample]
+    if len(absent) < 2:
+        print("Warning: too few un-ingested cities left to test gating.")
 
     queries = {
         "general": "What should a traveller know about visiting {c}?",

@@ -36,9 +36,24 @@ typing-extensions>=4.12.2
 # ── RAG: vector store, embeddings, sparse, reranking ────────
 chromadb==0.5.3
 langchain-chroma==0.1.4
-sentence-transformers==3.3.1     # also provides the CrossEncoder reranker
 rank-bm25==0.2.2
 pypdf==4.2.0
+
+# NOTE: torch / sentence-transformers / transformers are deliberately ABSENT.
+#
+# Embeddings run on chromadb's bundled ONNX build of all-MiniLM-L6-v2 - the
+# same model, without PyTorch. Measured whole-app resident set:
+#     with torch     1,025 MB   (over the 1 GB free-tier ceiling)
+#     with ONNX        ~400 MB
+# langchain-core's transformers import is wrapped in try/except, so its
+# absence degrades gracefully rather than breaking.
+#
+# The cross-encoder reranker DOES need sentence-transformers. It is optional:
+# without it the destination filter still gates out-of-corpus destinations
+# (verified 7/7), you only lose relevance ordering within a destination.
+# To develop with it locally:
+#     pip install sentence-transformers==3.3.1
+# and leave RERANK_ENABLED=true. On a 1 GB host set RERANK_ENABLED=false.
 
 # ── Knowledge-base ingestion ────────────────────────────────
 # rag/ingest.py pulls Wikivoyage articles via the MediaWiki API.
@@ -68,5 +83,7 @@ langfuse==2.60.10
 # ── Evaluation (optional) ───────────────────────────────────
 # Needed by the Streamlit "RAG Eval" tab and evaluation.py. Without these
 # the tab reports that they are missing rather than failing oddly.
-ragas==0.2.9        # pulls langchain 0.3.30 — pins above match
-datasets==4.8.2
+# Evaluation only - NOT needed to run the app. Installing these on a 1 GB
+# host wastes memory the request path needs. For local eval runs:
+#     pip install ragas==0.2.9 datasets==4.8.2
+# then: python -m eval.harness --ragas

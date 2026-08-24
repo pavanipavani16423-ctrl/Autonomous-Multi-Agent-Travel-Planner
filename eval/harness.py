@@ -82,13 +82,15 @@ CASES: List[Dict[str, Any]] = [
     {
         "name": "ungrounded",
         "request": dict(
-            origin="Mumbai", destination="Tashkent",
+            origin="Mumbai", destination="Asuncion",
             departure_date=_future(60), return_date=_future(64),
             travellers=1, budget_usd=1500, travel_purpose="adventure",
             dietary_preference="no preference", accommodation_preference="budget",
         ),
-        # The corpus has no Tashkent. Reporting grounding here would mean the
+        # The corpus has no Asuncion. Reporting grounding here would mean the
         # destination filter had let another city's facts through.
+        # (Tashkent used to be this case, until it got ingested - pick a
+        # destination that is genuinely absent, and re-check if you ingest it.)
         "expect": {"grounding_ratio_max": 0.0},
     },
     {

@@ -139,6 +139,18 @@ not the live one. Don't edit it expecting the app to change.
   silently fall back to a canned summary. Keep that split.
 - Config is read once at import as module-level singletons, so changing `.env` requires
   a process restart.
+- **Embeddings run on ONNX, not PyTorch.** `get_embeddings()` in
+  [rag/rag.py](rag/rag.py) uses chromadb's bundled ONNX build of
+  all-MiniLM-L6-v2. Same model, same 384-dim L2-normalised vectors, but no
+  torch: whole-app resident set is 455 MB instead of 1,025 MB, which is what
+  makes the 1 GB free tiers viable. sentence-transformers is a *fallback* and
+  is not in requirements. **An index built by one embedder must be queried by
+  the same one** — switching means re-ingesting.
+- **The reranker is optional; the destination filter is not.** With
+  `RERANK_ENABLED=false` the cross-encoder is skipped and out-of-corpus
+  destinations are *still* gated, because `filter_by_destination` runs first
+  and independently (verified 18/18 gated). You lose ordering quality within
+  a destination, not the grounding guarantee.
 - **Watch the per-request token ceiling.** Groq's free tier allows 8,000 tokens per
   minute and counts reserved `max_tokens` toward a *single* request. A prompt that
   serialises whole Pydantic objects blows through it and returns HTTP 413 — which no
