@@ -45,7 +45,9 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Annotated
+import functools
 import operator
+import time
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -67,6 +69,46 @@ from agents.agents import (
     RouteAgent, HotelAgent, BudgetAgent, FoodAgent, FinalPlannerAgent,
     SupervisorAgent,
 )
+from langfuse_setup import get_tracer
+from agents.agents import drain_llm_errors
+from memory.store import save_run, get_cached_plan
+from memory.metrics import plan_metrics
+from prompts.prompts import PROMPT_VERSION
+
+
+# ══════════════════════════════════════════════════════════════
+# Node instrumentation
+# ══════════════════════════════════════════════════════════════
+
+def traced_node(node_name: str):
+    """
+    Wrap a graph node so each one becomes a named Langfuse span.
+
+    The LLM calls inside are already traced by the callback handler in
+    BaseAgent; this adds the surrounding structure — which node ran, how long
+    it took, and what it produced — so a trace reads as the pipeline rather
+    than as nine loose generations. Node functions stay plain dict->dict.
+    """
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(state: dict) -> dict:
+            tracer = get_tracer()
+            request = state.get("request")
+            with tracer.span(
+                f"node:{node_name}",
+                input={"destination": getattr(request, "destination", None)},
+                metadata={"node": node_name},
+            ) as span:
+                result = fn(state)
+                produced = result.get(node_name) if isinstance(result, dict) else None
+                span.set_output(
+                    produced=type(produced).__name__ if produced is not None else None,
+                    ok=produced is not None,
+                    warnings=len(result.get("warnings", [])) if isinstance(result, dict) else 0,
+                )
+                return result
+        return wrapper
+    return decorator
 
 
 # ══════════════════════════════════════════════════════════════
@@ -121,6 +163,7 @@ class TravelGraphState(dict):
 # Each node is a plain Python function that accepts and returns
 # a state dict.  LangGraph handles routing between them.
 
+@traced_node("validate_input")
 def validate_input_node(state: dict) -> dict:
     """
     Node 1: Input Guardrails
@@ -147,6 +190,7 @@ def validate_input_node(state: dict) -> dict:
     return state
 
 
+@traced_node("retrieval")
 def retrieval_node(state: dict) -> dict:
     """
     Node 2: RAG Retrieval
@@ -164,6 +208,7 @@ def retrieval_node(state: dict) -> dict:
     return state
 
 
+@traced_node("tools")
 def tool_node(state: dict) -> dict:
     """
     Node 3: External Tool Calls
@@ -181,6 +226,7 @@ def tool_node(state: dict) -> dict:
     return state
 
 
+@traced_node("weather")
 def weather_node(state: dict) -> dict:
     """
     Node 4: Weather Analysis
@@ -204,6 +250,7 @@ def weather_node(state: dict) -> dict:
     return state
 
 
+@traced_node("route")
 def route_node(state: dict) -> dict:
     """
     Node 5: Route Planning
@@ -234,6 +281,7 @@ def route_node(state: dict) -> dict:
     return state
 
 
+@traced_node("hotels")
 def hotel_node(state: dict) -> dict:
     """
     Node 6: Hotel Recommendations
@@ -257,6 +305,7 @@ def hotel_node(state: dict) -> dict:
     return state
 
 
+@traced_node("budget")
 def budget_node(state: dict) -> dict:
     """
     Node 7: Budget Planning
@@ -282,6 +331,7 @@ def budget_node(state: dict) -> dict:
     return state
 
 
+@traced_node("food")
 def food_node(state: dict) -> dict:
     """
     Node 8: Food Recommendations
@@ -305,6 +355,7 @@ def food_node(state: dict) -> dict:
     return state
 
 
+@traced_node("validate_outputs")
 def validate_outputs_node(state: dict) -> dict:
     """
     Node 9: Output Guardrails
@@ -325,6 +376,8 @@ def validate_outputs_node(state: dict) -> dict:
         budget=state.get("budget"),
         food=state.get("food"),
         request=request,
+        data_sources=state.get("tool_data", {}).get("data_sources", {}),
+        rag_grounding=state.get("rag_contexts", {}).get("grounded", {}),
     )
 
     state["warnings"].extend(guardrail_result.warnings)
@@ -341,6 +394,7 @@ def validate_outputs_node(state: dict) -> dict:
     return state
 
 
+@traced_node("final_planner")
 def final_planner_node(state: dict) -> dict:
     """
     Node 10: Final Plan Assembly
@@ -361,6 +415,8 @@ def final_planner_node(state: dict) -> dict:
         budget=state.get("budget"),
         food=state.get("food"),
         warnings=state.get("warnings", []),
+        data_sources=state.get("tool_data", {}).get("data_sources", {}),
+        rag_grounding=state.get("rag_contexts", {}).get("grounded", {}),
     )
 
     return state
@@ -464,14 +520,48 @@ def build_travel_graph() -> StateGraph:
 # SECTION 5 — Compiled App Factory
 # ══════════════════════════════════════════════════════════════
 
+_COMPILED = None
+
+
+def _make_checkpointer():
+    """
+    Durable working memory.
+
+    MemorySaver kept checkpoints in RAM *and* was constructed fresh inside
+    every call, so the pause/resume and state-inspection that LangGraph
+    advertises were unreachable: each run's checkpoints were discarded the
+    moment it returned. SQLite makes the working state outlive the process,
+    which is what lets a crashed or interrupted run be inspected afterwards.
+
+    check_same_thread=False because Streamlit serves each session on its own
+    thread; the default would reject the connection on the second request.
+    Falls back to RAM rather than failing the run if the file is unusable.
+    """
+    try:
+        import sqlite3
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        from memory.store import DB_DIR
+
+        os.makedirs(DB_DIR, exist_ok=True)
+        path = os.path.join(DB_DIR, "checkpoints.db")
+        conn = sqlite3.connect(path, check_same_thread=False)
+        logger.info(f"[Graph] Checkpointing to {path}")
+        return SqliteSaver(conn)
+    except Exception as e:
+        logger.warning(
+            f"[Graph] SQLite checkpointer unavailable ({e}) — "
+            "falling back to in-memory checkpoints for this process"
+        )
+        return MemorySaver()
+
+
 def get_compiled_graph():
     """
     Build, compile, and return the LangGraph application.
 
-    MemorySaver provides in-memory checkpointing, enabling:
-      • Pause and resume mid-execution
-      • State inspection at each node
-      • Automatic retry on transient failures
+    Compiled once and cached. Rebuilding the graph on every request was pure
+    overhead — the topology never changes between runs, and a fresh
+    checkpointer each time defeated checkpointing entirely.
 
     Returns
     -------
@@ -480,19 +570,23 @@ def get_compiled_graph():
       .stream(state)  — token streaming
       .get_state()    — current state inspection
     """
-    workflow = build_travel_graph()
-    # MemorySaver: stores checkpoints in RAM (use SqliteSaver for persistence)
-    memory = MemorySaver()
-    app = workflow.compile(checkpointer=memory)
-    logger.info("[Graph] LangGraph application compiled and ready")
-    return app
+    global _COMPILED
+    if _COMPILED is None:
+        workflow = build_travel_graph()
+        _COMPILED = workflow.compile(checkpointer=_make_checkpointer())
+        logger.info("[Graph] LangGraph application compiled and ready")
+    return _COMPILED
 
 
 # ══════════════════════════════════════════════════════════════
 # SECTION 6 — High-Level Run Function
 # ══════════════════════════════════════════════════════════════
 
-def run_travel_pipeline(request: TravelRequest) -> dict:
+def run_travel_pipeline(
+    request: TravelRequest,
+    use_cache: bool = True,
+    trace_id: str = "",
+) -> dict:
     """
     Public interface for the entire multi-agent pipeline.
 
@@ -510,6 +604,59 @@ def run_travel_pipeline(request: TravelRequest) -> dict:
       state["errors"]      : List of error messages
       state["warnings"]    : List of warning messages
     """
+    # ── Cache lookup ──────────────────────────────────────────
+    # An identical request costs ~4 minutes and ~19k tokens to recompute for
+    # a byte-identical answer. The returned state is marked `from_cache` so
+    # callers (and the UI) can say so rather than implying fresh work.
+    if use_cache:
+        cached = get_cached_plan(request)
+        if cached is not None:
+            return {
+                "request": request,
+                "final_plan": cached,
+                "route": cached.route,
+                "weather": cached.weather,
+                "hotels": cached.hotels,
+                "budget": cached.budget,
+                "food": cached.food,
+                "rag_contexts": {"grounded": cached.rag_grounding or {}},
+                "tool_data": {"data_sources": cached.data_sources or {}},
+                "errors": [],
+                "warnings": list(cached.warnings or []),
+                "current_node": "cache",
+                "is_valid_input": True,
+                "from_cache": True,
+            }
+
+    drain_llm_errors()   # discard anything left over from a previous run
+
+    # Guarantee exactly one trace per pipeline run.
+    #
+    # The agents attach their LLM calls to whatever trace is open. When there
+    # isn't one — the CLI, the eval harness, any direct caller — each chain
+    # opened its OWN root trace, so a single plan showed up in Langfuse as
+    # seven unrelated traces named "RouteAgent", "FoodAgent" and so on, with
+    # no request context and no scores. Opening one here when the caller has
+    # not already done so keeps every entry point consistent.
+    tracer = get_tracer()
+    if not tracer.is_tracing():
+        with tracer.trace(
+            name=f"travel_plan_{request.destination}",
+            input_data={
+                "origin": request.origin, "destination": request.destination,
+                "departure": request.departure_date, "return": request.return_date,
+                "travellers": request.travellers, "budget_usd": request.budget_usd,
+            },
+            metadata={"entrypoint": "pipeline"},
+            tags=["travel-planner"],
+        ):
+            return _execute_pipeline(request, trace_id=trace_id)
+
+    return _execute_pipeline(request, trace_id=trace_id)
+
+
+def _execute_pipeline(request: TravelRequest, trace_id: str = "") -> dict:
+    """Run the compiled graph. Assumes a trace is already open."""
     app = get_compiled_graph()
 
     # Initial state
@@ -538,13 +685,45 @@ def run_travel_pipeline(request: TravelRequest) -> dict:
         f"{request.departure_date} – {request.return_date}"
     )
 
+    started = time.time()
     try:
         final_state = app.invoke(initial_state, config=config)
+        elapsed = time.time() - started
+        final_state["from_cache"] = False
+
+        # Agents swallow their exceptions so one failure cannot abort the run.
+        # Collect what they swallowed, otherwise a rate-limited call shows up
+        # as an empty section with no explanation anywhere in the UI.
+        final_state["llm_errors"] = drain_llm_errors()
+        if final_state["llm_errors"]:
+            kinds = {e["kind"] for e in final_state["llm_errors"]}
+            logger.warning(
+                f"[Graph] {len(final_state['llm_errors'])} LLM call(s) failed "
+                f"({', '.join(sorted(kinds))}) — sections will be incomplete"
+            )
+
         logger.info(
-            f"[Graph] Pipeline completed | "
+            f"[Graph] Pipeline completed in {elapsed:.0f}s | "
             f"plan={final_state.get('final_plan') is not None} | "
             f"errors={len(final_state.get('errors', []))}"
         )
+
+        # Record the run: history for the user, and the metrics substrate the
+        # quality harness compares prompt versions against.
+        try:
+            metrics = plan_metrics(final_state, latency_s=elapsed)
+            final_state["metrics"] = metrics
+            final_state["run_id"] = save_run(
+                request=request,
+                plan=final_state.get("final_plan"),
+                metrics=metrics,
+                prompt_version=PROMPT_VERSION,
+                trace_id=trace_id,
+                latency_s=elapsed,
+            )
+        except Exception as e:
+            logger.warning(f"[Graph] Could not record run: {e}")
+
         return final_state
     except Exception as e:
         logger.error(f"[Graph] Pipeline execution failed: {e}")

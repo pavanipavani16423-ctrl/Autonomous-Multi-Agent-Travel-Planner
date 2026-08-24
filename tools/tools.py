@@ -40,6 +40,28 @@ from config import api_config
 # SECTION 1 — Base Classes & Mock Fallback
 # ══════════════════════════════════════════════════════════════
 
+# ── Provenance constants ─────────────────────────────────────
+# Every tool payload carries one of these under SOURCE_KEY. The stamp is
+# propagated through ToolAgent → graph state → TravelPlan → UI so a plan
+# built on fixtures can never be presented as though it were live data.
+SOURCE_KEY     = "_source"
+SOURCE_LIVE    = "live"     # answered by a real third-party API
+SOURCE_MOCK    = "mock"     # hardcoded fixture (no key, or the call failed)
+SOURCE_CURATED = "curated"  # hand-maintained local table, real but static
+
+
+def source_of(raw_json: str) -> str:
+    """
+    Read the provenance stamp back out of a tool's JSON string.
+    Unknown/unparseable payloads are treated as mock — fail closed, so an
+    unreadable response is never mistaken for live data.
+    """
+    try:
+        return json.loads(raw_json).get(SOURCE_KEY, SOURCE_MOCK)
+    except Exception:
+        return SOURCE_MOCK
+
+
 def _mock_response(tool_name: str, params: dict) -> dict:
     """
     Returns realistic mock data when real API keys are unavailable.
@@ -89,7 +111,9 @@ def _mock_response(tool_name: str, params: dict) -> dict:
             ]
         },
     }
-    return mocks.get(tool_name, {"status": "mock", "data": {}})
+    payload = dict(mocks.get(tool_name, {"status": "mock", "data": {}}))
+    payload[SOURCE_KEY] = SOURCE_MOCK
+    return payload
 
 
 # ══════════════════════════════════════════════════════════════
@@ -173,6 +197,9 @@ class WeatherTool(BaseTool):
         logger.info(f"[WeatherTool] Fetching weather for {city}")
         try:
             data = self._call_api(city, country_code)
+            # _call_api already stamps SOURCE_MOCK when the key is absent;
+            # only an untagged payload actually came off the wire.
+            data.setdefault(SOURCE_KEY, SOURCE_LIVE)
             return json.dumps(data, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WeatherTool] Error: {e}")
@@ -229,6 +256,7 @@ class MapsTool(BaseTool):
                 "distance_text": element["distance"]["text"],
                 "duration_text": element["duration"]["text"],
                 "status": element["status"],
+                SOURCE_KEY: SOURCE_LIVE,
             })
         except Exception as e:
             logger.error(f"[MapsTool] Error: {e}")
@@ -325,7 +353,7 @@ class HotelSearchTool(BaseTool):
                 }
                 for h in raw_hotels[:10]
             ]
-            return json.dumps({"hotels": hotels})
+            return json.dumps({"hotels": hotels, SOURCE_KEY: SOURCE_LIVE})
         except Exception as e:
             logger.error(f"[HotelTool] Error: {e}")
             return json.dumps(_mock_response("hotel", {}))
@@ -383,17 +411,26 @@ class RestaurantTool(BaseTool):
         city_key = city.lower()
 
         # Look for city data or fall back to generic mock
-        restaurants = self.CITY_DATA.get(city_key, _mock_response("restaurant", {})["restaurants"])
+        if city_key in self.CITY_DATA:
+            restaurants = self.CITY_DATA[city_key]
+            source = SOURCE_CURATED
+        else:
+            restaurants = _mock_response("restaurant", {})["restaurants"]
+            source = SOURCE_MOCK
 
-        # Apply dietary filter
-        if "vegetarian" in dietary.lower():
-            filtered = [r for r in restaurants if "vegetar" not in r.get("cuisine", "").lower()]
-            if not filtered:
-                filtered = restaurants  # Don't filter to empty
+        # Apply dietary filter. Veg/vegan diners want the veg-friendly places
+        # ranked FIRST — the previous condition dropped exactly the restaurants
+        # they were asking for.
+        diet = dietary.lower()
+        if "vegetarian" in diet or "vegan" in diet:
+            veg = [r for r in restaurants if "vegetar" in r.get("cuisine", "").lower()
+                   or "vegan" in r.get("cuisine", "").lower()]
+            rest = [r for r in restaurants if r not in veg]
+            filtered = veg + rest
         else:
             filtered = restaurants
 
-        return json.dumps({"city": city, "restaurants": filtered})
+        return json.dumps({"city": city, "restaurants": filtered, SOURCE_KEY: source})
 
     async def _arun(self, city: str, cuisine: str = "all", dietary: str = "no preference") -> str:
         return self._run(city, cuisine, dietary)
@@ -478,7 +515,7 @@ class FlightSearchTool(BaseTool):
                 }
                 for f in raw[:5]
             ]
-            return json.dumps({"flights": flights})
+            return json.dumps({"flights": flights, SOURCE_KEY: SOURCE_LIVE})
         except Exception as e:
             logger.error(f"[FlightTool] Error: {e}")
             return json.dumps(_mock_response("flight", {}))

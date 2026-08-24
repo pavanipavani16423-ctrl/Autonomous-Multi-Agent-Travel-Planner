@@ -2,6 +2,7 @@
 # langfuse_setup.py — Fixed: Langfuse v2 + RAGAS Integration
 # ============================================================
 import os
+import time
 import atexit
 from typing import Optional, Any, Dict
 from dotenv import load_dotenv
@@ -61,7 +62,7 @@ def _init():
             host=host,
         )
         LANGFUSE_ENABLED = True
-        print(f"[Langfuse] ✅ Connected  |  host={host}")
+        print(f"[Langfuse] Connected | host={host}")
     except Exception as e:
         print(f"[Langfuse] Init failed: {e}")
 
@@ -98,6 +99,10 @@ class _SimpleTracer:
 
         def __exit__(self, *args):
             flush_langfuse()
+            # Detach. Without this the singleton keeps pointing at a finished
+            # trace, so the next un-traced call would nest into last request's
+            # trace instead of opening its own.
+            self._ref._trace = None
 
     def trace(self, name="", input_data=None, metadata=None, tags=None, **kwargs):
         return self._TraceCtx(
@@ -133,6 +138,93 @@ class _SimpleTracer:
         except Exception as e:
             print(f"[Langfuse] guardrail span failed: {e}")
 
+    def is_tracing(self) -> bool:
+        """True when a trace is currently open for spans to attach to."""
+        return LANGFUSE_ENABLED and self._trace is not None
+
+    def get_langchain_handler(self):
+        """
+        A CallbackHandler bound to the CURRENTLY ACTIVE trace.
+
+        This is what actually gets LLM calls into Langfuse. Passing the global
+        handler instead would work, but every chain would open its own root
+        trace, so one travel plan would scatter across nine unrelated traces
+        with no shared parent. Binding to the live trace nests every agent
+        under the plan that caused it.
+
+        Returns None when tracing is off, so callers can pass `callbacks=[]`.
+        """
+        if not LANGFUSE_ENABLED:
+            return None
+        if self._trace is not None:
+            try:
+                return self._trace.get_langchain_handler(update_parent=False)
+            except Exception as e:
+                print(f"[Langfuse] bound handler failed ({e}); using global handler")
+        return langfuse_handler
+
+    def langchain_config(self, run_name: str, metadata: Optional[dict] = None) -> dict:
+        """
+        Build the `config=` dict for a chain invocation.
+
+        `run_name` is what shows up as the span name in Langfuse, so each agent
+        appears by name rather than as an anonymous RunnableSequence.
+        """
+        cfg: Dict[str, Any] = {"run_name": run_name}
+        handler = self.get_langchain_handler()
+        if handler is not None:
+            cfg["callbacks"] = [handler]
+        if metadata:
+            cfg["metadata"] = metadata
+        return cfg
+
+    def span(self, name: str, **kwargs):
+        """
+        Context manager for a non-LLM unit of work (a graph node, retrieval,
+        a guardrail pass). Records duration and any output you set on it.
+        Always yields an object, so call sites need no `if enabled` branches.
+        """
+        return self._Span(self, name, **kwargs)
+
+    class _Span:
+        def __init__(self, tracer_ref, name: str, **kwargs):
+            self._ref = tracer_ref
+            self._name = name
+            self._kwargs = kwargs
+            self._span = None
+            self._t0 = None
+            self.output: Dict[str, Any] = {}
+
+        def __enter__(self):
+            self._t0 = time.time()
+            if LANGFUSE_ENABLED and self._ref._trace is not None:
+                try:
+                    self._span = self._ref._trace.span(
+                        name=self._name,
+                        input=self._kwargs.get("input", {}),
+                        metadata=self._kwargs.get("metadata", {}),
+                    )
+                except Exception as e:
+                    print(f"[Langfuse] span start failed: {e}")
+            return self
+
+        def set_output(self, **fields):
+            """Attach result fields; they land on the span when it closes."""
+            self.output.update(fields)
+
+        def __exit__(self, exc_type, exc, tb):
+            elapsed_ms = round((time.time() - self._t0) * 1000, 1) if self._t0 else 0
+            if self._span is not None:
+                try:
+                    payload = dict(self.output)
+                    payload["duration_ms"] = elapsed_ms
+                    if exc is not None:
+                        payload["error"] = f"{exc_type.__name__}: {exc}"
+                    self._span.end(output=payload)
+                except Exception as e:
+                    print(f"[Langfuse] span end failed: {e}")
+            return False  # never swallow exceptions
+
     def set_output(self, output: dict):
         if not LANGFUSE_ENABLED or not self._trace:
             return
@@ -161,6 +253,46 @@ class _SimpleTracer:
         except Exception as e:
             print(f"[Langfuse] score_plan failed: {e}")
 
+    def score_quality(self, trace_id: Optional[str],
+                      data_sources: Optional[dict] = None,
+                      rag_grounding: Optional[dict] = None,
+                      warnings: int = 0,
+                      latency_s: Optional[float] = None):
+        """
+        Push objective quality scores for the run.
+
+        Deliberately separate from score_plan(): those are the agents' own
+        confidence numbers, which stay high even when every input was a
+        fixture. These are measured facts about the run —
+          live_data_ratio : share of tool calls answered by a real API
+          grounding_ratio : share of retrieval areas with destination-specific
+                            knowledge behind them
+        Both are the right things to alert on when quality regresses.
+        """
+        if not LANGFUSE_ENABLED or not langfuse_client or not trace_id:
+            return
+
+        scores: Dict[str, float] = {}
+        if data_sources:
+            live = sum(1 for v in data_sources.values() if v in ("live", "curated"))
+            scores["live_data_ratio"] = live / len(data_sources)
+        if rag_grounding:
+            grounded = sum(1 for v in rag_grounding.values() if v)
+            scores["grounding_ratio"] = grounded / len(rag_grounding)
+        scores["guardrail_warnings"] = float(warnings)
+        if latency_s is not None:
+            scores["latency_seconds"] = round(float(latency_s), 2)
+
+        for name, value in scores.items():
+            try:
+                langfuse_client.score(
+                    trace_id=trace_id, name=name, value=float(value)
+                )
+            except Exception as e:
+                print(f"[Langfuse] score {name} failed: {e}")
+        print(f"[Langfuse] Quality scores: "
+              + ", ".join(f"{k}={v}" for k, v in scores.items()))
+
     # ── FIX 3: RAGAS scores pushed to Langfuse properly ──────
     def score_ragas(self, trace_id: Optional[str], ragas_scores: Dict[str, float]):
         """
@@ -182,7 +314,7 @@ class _SimpleTracer:
                     value    = float(value),
                     comment  = f"RAGAS evaluation: {metric}",
                 )
-            print(f"[RAGAS] ✅ Pushed {len(ragas_scores)} scores to Langfuse trace {trace_id[:8]}...")
+            print(f"[RAGAS] Pushed {len(ragas_scores)} scores to Langfuse trace {trace_id[:8]}...")
             langfuse_client.flush()
         except Exception as e:
             print(f"[Langfuse] score_ragas failed: {e}")
@@ -220,6 +352,7 @@ __all__ = [
     "langfuse_handler",
     "get_tracer",
     "get_langfuse_handler",
+    "score_pipeline_quality",
     "flush_langfuse",
 ]
 # ============================================================
@@ -304,7 +437,7 @@ def run_ragas_evaluation(
             "answer_correctness": float(result["answer_correctness"]),
         }
 
-        print("[RAGAS] ✅ Scores:")
+        print("[RAGAS] Scores:")
         for k, v in scores.items():
             print(f"  {k}: {v:.3f}")
 

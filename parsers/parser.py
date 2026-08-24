@@ -30,6 +30,7 @@ from loguru import logger
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from models.models import (
+    PlanSynthesis,
     RouteOutput, WeatherOutput, HotelOutput,
     BudgetOutput, FoodOutput, TravelPlan,
 )
@@ -167,6 +168,7 @@ hotel_parser = PydanticOutputParser(pydantic_object=HotelOutput)
 budget_parser = PydanticOutputParser(pydantic_object=BudgetOutput)
 food_parser = PydanticOutputParser(pydantic_object=FoodOutput)
 travel_plan_parser = PydanticOutputParser(pydantic_object=TravelPlan)
+plan_synthesis_parser = PydanticOutputParser(pydantic_object=PlanSynthesis)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -261,6 +263,22 @@ def get_food_format_instructions() -> str:
     return food_parser.get_format_instructions()
 
 
+def parse_plan_synthesis(raw: str) -> Optional[PlanSynthesis]:
+    """Parse LLM output -> PlanSynthesis with auto-repair."""
+    try:
+        result = plan_synthesis_parser.parse(raw)
+        logger.info(
+            f"[SynthesisParser] Parsed OK | confidence={result.overall_confidence}"
+        )
+        return result
+    except OutputParserException:
+        return repair_and_parse(raw, PlanSynthesis)
+
+
+def get_plan_synthesis_format_instructions() -> str:
+    return plan_synthesis_parser.get_format_instructions()
+
+
 __all__ = [
     "repair_and_parse",
     "repair_json",
@@ -270,6 +288,8 @@ __all__ = [
     "parse_budget_output",
     "parse_food_output",
     "parse_travel_plan",
+    "parse_plan_synthesis",
+    "get_plan_synthesis_format_instructions",
     "get_route_format_instructions",
     "get_weather_format_instructions",
     "get_hotel_format_instructions",

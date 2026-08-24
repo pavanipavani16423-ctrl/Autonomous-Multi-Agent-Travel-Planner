@@ -2,11 +2,18 @@ __pycache__/
 *.pyc
 *.pyo
 venv/
+.venv/
 .env
-chroma_db/
 .git/
 .vscode/
 *.log
 .DS_Store
 Thumbs.db
 *.ipynb
+
+# Rebuilt inside the image from data/corpus.jsonl. Copying a host-built
+# index in is actively harmful: one written by a different chromadb
+# version is unreadable and silently disables dense retrieval.
+chroma_db/
+
+# data/corpus.jsonl is NOT excluded — the image build needs it.

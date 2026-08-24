@@ -367,6 +367,110 @@ def validate_final_plan(plan: Optional[TravelPlan]) -> GuardrailResult:
 # SECTION 4 — Convenience Orchestrator
 # ══════════════════════════════════════════════════════════════
 
+def validate_data_provenance(data_sources: Optional[dict]) -> GuardrailResult:
+    """
+    Warn when any section of the plan was built on fixture data.
+
+    Without this the pipeline happily ships the mock weather fixture (24 °C,
+    'Partly cloudy') as a real forecast for any destination, with a high
+    agent-reported confidence attached. Provenance is not an agent opinion, so
+    it is the one honest quality signal available.
+    """
+    result = GuardrailResult()
+
+    if not data_sources:
+        result.warn("No tool provenance recorded — treat all external data as unverified.")
+        return result
+
+    mocked = sorted(k for k, v in data_sources.items() if v == "mock")
+    if mocked:
+        result.warn(
+            f"{len(mocked)} of {len(data_sources)} data sources are simulated "
+            f"({', '.join(mocked)}). These sections are illustrative, not real — "
+            "add the matching API keys for live data."
+        )
+    return result
+
+
+def validate_itinerary_dates(
+    route: Optional[RouteOutput],
+    request: TravelRequest,
+) -> GuardrailResult:
+    """
+    Cross-check the itinerary against the dates the user actually asked for.
+
+    Catches the common failure where the LLM emits one entry per calendar date
+    inclusive (a 5-day itinerary for a 4-night trip) or drifts off the
+    requested window entirely.
+    """
+    result = GuardrailResult()
+    if route is None:
+        return result
+
+    try:
+        dep = datetime.strptime(request.departure_date, "%Y-%m-%d").date()
+        ret = datetime.strptime(request.return_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return result  # date format already reported by input guardrails
+
+    nights = (ret - dep).days
+    n_days = len(route.day_wise_itinerary)
+
+    # An itinerary may legitimately cover the departure day through the return
+    # day, i.e. nights+1 entries. Anything outside that is a real mismatch.
+    if n_days and n_days not in (nights, nights + 1):
+        result.warn(
+            f"Itinerary has {n_days} days but the trip is {nights} nights "
+            f"({request.departure_date} → {request.return_date})."
+        )
+
+    if route.total_days and route.total_days not in (nights, nights + 1):
+        result.warn(
+            f"RouteAgent reported total_days={route.total_days}, "
+            f"but the requested trip is {nights} nights."
+        )
+
+    for day in route.day_wise_itinerary:
+        try:
+            d = datetime.strptime(day.date, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            result.warn(f"Day {day.day} has an unparseable date: {day.date!r}.")
+            continue
+        if not (dep <= d <= ret):
+            result.warn(
+                f"Day {day.day} ({day.date}) falls outside the travel window."
+            )
+
+    return result
+
+
+def validate_rag_grounding(rag_grounding: Optional[dict]) -> GuardrailResult:
+    """
+    Warn when the knowledge base had nothing about this destination.
+
+    Not an error — the model's own knowledge is often good, and saying so is
+    far better than the previous behaviour of quietly substituting another
+    city's facts. But the user deserves to know which it was.
+    """
+    result = GuardrailResult()
+    if not rag_grounding:
+        return result
+
+    ungrounded = sorted(k for k, v in rag_grounding.items() if not v)
+    if len(ungrounded) == len(rag_grounding):
+        result.warn(
+            "The travel knowledge base has no entries for this destination. "
+            "The plan is built from the model's own knowledge rather than "
+            "retrieved sources — verify specifics before booking."
+        )
+    elif ungrounded:
+        result.warn(
+            f"No destination-specific knowledge retrieved for: "
+            f"{', '.join(ungrounded)}. Those sections rely on model knowledge."
+        )
+    return result
+
+
 def run_all_output_guardrails(
     route: Optional[RouteOutput],
     weather: Optional[WeatherOutput],
@@ -374,6 +478,8 @@ def run_all_output_guardrails(
     budget: Optional[BudgetOutput],
     food: Optional[FoodOutput],
     request: TravelRequest,
+    data_sources: Optional[dict] = None,
+    rag_grounding: Optional[dict] = None,
 ) -> GuardrailResult:
     """
     Run every output guardrail in sequence and aggregate results.
@@ -382,6 +488,9 @@ def run_all_output_guardrails(
     master = GuardrailResult()
 
     checks = [
+        ("DataSources",  validate_data_provenance(data_sources)),
+        ("Grounding",    validate_rag_grounding(rag_grounding)),
+        ("Itinerary",    validate_itinerary_dates(route, request)),
         ("RouteAgent",   validate_agent_confidence("RouteAgent", route)),
         ("RouteOutput",  validate_route_output(route)),
         ("WeatherAgent", validate_agent_confidence("WeatherAgent", weather)),
@@ -410,5 +519,8 @@ __all__ = [
     "validate_budget_output",
     "validate_hotel_output",
     "validate_final_plan",
+    "validate_data_provenance",
+    "validate_rag_grounding",
+    "validate_itinerary_dates",
     "run_all_output_guardrails",
 ]

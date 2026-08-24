@@ -1,4 +1,8 @@
-version: '3.8'
+# Local run. For hosted deploys see render.yaml and DEPLOY.md.
+#
+# The vector index is built INTO the image from data/corpus.jsonl, so there is
+# no chroma volume here on purpose — mounting a host-built index over it is
+# how you get an unreadable store and silently dead dense retrieval.
 
 services:
   travel-planner:
@@ -9,31 +13,38 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-demo}
-      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-demo}
-      - AMADEUS_API_KEY=${AMADEUS_API_KEY:-demo}
-      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET:-demo}
+      # Required. Everything else has a default or degrades to fixture data.
+      - GROQ_API_KEY=${GROQ_API_KEY:?GROQ_API_KEY must be set}
+
+      - LLM_MODEL=${LLM_MODEL:-openai/gpt-oss-120b}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+
+      # Unset keys make the matching tool return fixtures. The UI labels those
+      # sections "mock" and lowers the plan's confidence.
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
+      - AMADEUS_API_KEY=${AMADEUS_API_KEY:-}
+      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET:-}
+
+      # Omit the Langfuse keys to run with tracing disabled.
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - APP_HOST=0.0.0.0
-      - APP_PORT=8501
-      - DEBUG=False
+      - LANGFUSE_HOST_URL=${LANGFUSE_HOST_URL:-https://us.cloud.langfuse.com}
+
       - CHROMA_PERSIST_DIR=/app/chroma_db
-      - LLM_MODEL=llama-3.3-70b-versatile
-      - LLM_TEMPERATURE=0.3
-      - LLM_MAX_TOKENS=4096
-    volumes:
-      - chroma_data:/app/chroma_db
-      - ./data:/app/data
+      - RERANK_ENABLED=${RERANK_ENABLED:-true}
+      - RERANK_MIN_SCORE=${RERANK_MIN_SCORE:--8.0}
+
+      - PORT=8501
+      - DEBUG=False
     restart: unless-stopped
-    networks:
-      - travel-network
 
-volumes:
-  chroma_data:
-    driver: local
-
-networks:
-  travel-network:
-    driver: bridge
+    # Matches the ~1.5 GB resident set of torch + embedder + reranker + index.
+    # Below this the container is OOM-killed part-way through a plan.
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G

@@ -7,6 +7,16 @@ import os
 # Add current directory to path so all imports work
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# The plan text is LLM-authored and routinely contains typographic characters
+# (en dashes, non-breaking hyphens, °). On a stock Windows console stdout is
+# cp1252 and printing those raises UnicodeEncodeError mid-plan, losing the
+# whole run. Force UTF-8 and degrade unmappable glyphs instead of crashing.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    pass
+
 from graph import run_travel_pipeline
 from models import TravelRequest
 
@@ -71,6 +81,23 @@ def main():
     print("="*60)
     print(f"\n📋 SUMMARY\n{plan.executive_summary}")
     print(f"\n🎯 Overall Confidence: {plan.overall_confidence:.0%}")
+
+    # ── Data provenance ───────────────────────────────────────
+    if plan.data_sources:
+        mocked = plan.mocked_sources
+        print(f"\n{'='*60}")
+        print("📊 DATA SOURCES")
+        print(f"{'='*60}")
+        for name, src in sorted(plan.data_sources.items()):
+            icon = {"live": "🟢", "curated": "🔵"}.get(src, "🟡")
+            print(f"  {icon} {name:12} {src}")
+        if mocked:
+            print(
+                f"\n  ⚠️  {len(mocked)} of {len(plan.data_sources)} sources are SIMULATED "
+                f"({', '.join(mocked)})."
+            )
+            print("     Prices, weather and availability there are placeholders,")
+            print("     not real figures. Add the matching API keys to .env.")
 
     # ── Route ─────────────────────────────────────────────────
     if plan.route:

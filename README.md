@@ -1,3 +1,15 @@
+---
+title: Voyager AI Travel Planner
+emoji: 🧭
+colorFrom: yellow
+colorTo: gray
+sdk: docker
+app_port: 8501
+pinned: false
+license: mit
+short_description: Multi-agent travel planner with grounded retrieval
+---
+
 🌍 Autonomous Multi-Agent Travel Planner
 
 «Transforming travel planning with the power of Autonomous AI Agents.»

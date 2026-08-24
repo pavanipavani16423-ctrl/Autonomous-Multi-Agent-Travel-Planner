@@ -1,96 +1,72 @@
 # ============================================================
-# AUTONOMOUS MULTI-AGENT TRAVEL PLANNER
-# FINAL STABLE REQUIREMENTS
-# Docker + Streamlit + LangGraph + RAG Compatible
+# AUTONOMOUS MULTI-AGENT TRAVEL PLANNER — Requirements
+# ============================================================
+# Pins reflect the versions this project is actually verified against.
+#
+# Two of these are load-bearing and must not be bumped casually:
+#
+#   langfuse<3   — langfuse_setup.py uses the v2 API
+#                  (langfuse.callback.CallbackHandler, client.trace()).
+#                  v3 removed both. The ImportError is caught and only
+#                  printed, so installing v3 silently disables ALL tracing.
+#
+#   chromadb     — a persisted chroma_db/ written by a different chromadb
+#                  minor version is unreadable by this one, which used to
+#                  make dense retrieval fail silently and degrade hybrid
+#                  search to BM25-only. rag.py now detects and rebuilds,
+#                  but keeping the pin avoids the rebuild entirely.
 # ============================================================
 
-# ============================================================
-# CORE AI FRAMEWORK
-# ============================================================
+# ── Core AI framework ───────────────────────────────────────
+langchain==0.3.30
+langchain-core==0.3.86
+langchain-community==0.3.31
+langgraph==0.2.76
+# Durable working memory. Without it the graph falls back to in-RAM
+# checkpoints, which are discarded when the process restarts.
+langgraph-checkpoint-sqlite==2.0.11
 
-langchain==0.2.1
-langchain-core==0.2.3
-langchain-community==0.2.1
-langgraph==0.0.55
+# ── LLM provider ────────────────────────────────────────────
+langchain-groq==0.2.1
 
-# ============================================================
-# LLM PROVIDERS
-# ============================================================
+# ── Output parsing / validation ─────────────────────────────
+pydantic==2.13.4
+typing-extensions>=4.12.2
 
-langchain-groq==0.1.4
-langchain-google-genai==1.0.5
-google-generativeai==0.5.4
-
-# ============================================================
-# OUTPUT PARSING / VALIDATION
-# ============================================================
-
-pydantic==2.7.1
-typing-extensions==4.12.2
-
-# ============================================================
-# RAG / VECTOR DATABASE / EMBEDDINGS
-# ============================================================
-
-chromadb==0.5.0
-langchain-chroma==0.1.1
-sentence-transformers==2.7.0
-faiss-cpu==1.8.0
+# ── RAG: vector store, embeddings, sparse, reranking ────────
+chromadb==0.5.3
+langchain-chroma==0.1.4
+sentence-transformers==3.3.1     # also provides the CrossEncoder reranker
 rank-bm25==0.2.2
 pypdf==4.2.0
 
-# ============================================================
-# WEB SEARCH / SCRAPING
-# ============================================================
+# ── Knowledge-base ingestion ────────────────────────────────
+# rag/ingest.py pulls Wikivoyage articles via the MediaWiki API.
+requests==2.34.2
 
-duckduckgo-search==5.3.1
-wikipedia==1.4.0
-beautifulsoup4==4.12.3
-lxml==5.2.2
+# ── Web UI ──────────────────────────────────────────────────
+streamlit==1.40.1
 
-# ============================================================
-# HTTP / API CLIENTS
-# ============================================================
+# ── PDF itinerary export ────────────────────────────────────
+# Pure Python, no system libraries — unlike weasyprint/wkhtmltopdf, which
+# would need GTK or Qt inside the container.
+reportlab==5.0.0
 
-requests==2.32.3
-httpx==0.27.0
-aiohttp==3.9.5
+# ── Data processing ─────────────────────────────────────────
+pandas>=2.2.2
+numpy>=1.26.4
 
-# ============================================================
-# ENVIRONMENT VARIABLES
-# ============================================================
-
+# ── Environment / logging / retries ─────────────────────────
 python-dotenv==1.0.1
-
-# ============================================================
-# WEB UI
-# ============================================================
-
-streamlit==1.35.0
-
-# ============================================================
-# DATA PROCESSING
-# ============================================================
-
-pandas==2.2.2
-numpy==1.26.4
-
-# ============================================================
-# TOKENIZATION
-# ============================================================
-
-tiktoken==0.7.0
-
-# ============================================================
-# UTILITIES / LOGGING
-# ============================================================
-
 loguru==0.7.2
-tenacity==8.3.0
-rich==13.7.1
+tenacity==8.5.0
 
-# ============================================================
-# OBSERVABILITY
-# ============================================================
+# ── Observability ───────────────────────────────────────────
+# Must stay <3 — see the note at the top of this file.
+langfuse==2.60.10
 
-langfuse>=3.0.0
+# ── Evaluation (optional) ───────────────────────────────────
+# Needed by the Streamlit "RAG Eval" tab and evaluation.py. Without these
+# the tab reports that they are missing rather than failing oddly.
+ragas==0.2.9        # pulls langchain 0.3.30 — pins above match
+datasets==4.8.2

@@ -53,18 +53,84 @@ from prompts.prompts import (
 from parsers.parser import (
     parse_route_output, parse_weather_output, parse_hotel_output,
     parse_budget_output, parse_food_output, parse_travel_plan,
+    parse_plan_synthesis,
     get_route_format_instructions, get_weather_format_instructions,
     get_hotel_format_instructions, get_budget_format_instructions,
     get_food_format_instructions,
 )
 from guardrails.guardrails import validate_agent_confidence
-from tools.tools import tool_registry
-from rag.rag import get_retriever
+from tools.tools import tool_registry, source_of, SOURCE_MOCK
+from rag.rag import get_retriever, RetrievalResult, NO_CONTEXT_NOTICE
+from langfuse_setup import get_tracer
 
 
 # ══════════════════════════════════════════════════════════════
 # BASE AGENT
 # ══════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════
+# LLM failure tracking
+# ══════════════════════════════════════════════════════════════
+# Agents deliberately never raise — a failed call becomes a None section so
+# one bad agent cannot take down the run. The cost of that design is that
+# failures were completely invisible: a rate-limited call produced an empty
+# tab labelled "No itinerary available" with no reason given anywhere.
+#
+# These record what went wrong so the graph can attach it to the state and
+# the UI can tell the user the truth.
+
+_llm_errors: list = []
+
+
+def _parse_retry_after(message: str) -> str:
+    """
+    Pull the wait time out of a provider rate-limit message.
+
+    Groq says "Please try again in 25m23.664s". Telling the user to "wait a
+    minute or two" when the real answer is 25 minutes is worse than saying
+    nothing, so the actual figure is extracted and shown.
+    """
+    import re
+    m = re.search(r"try again in\s+(?:(\d+)m)?([\d.]+)s", message, re.I)
+    if not m:
+        return ""
+    minutes = int(m.group(1) or 0)
+    seconds = float(m.group(2) or 0)
+    total = minutes * 60 + seconds
+    if total < 90:
+        return f"about {int(total)} seconds"
+    return f"about {round(total / 60)} minutes"
+
+
+def record_llm_error(agent: str, message: str) -> None:
+    """Note an LLM failure so it can be surfaced instead of silently dropped."""
+    kind = "error"
+    retry_after = ""
+    daily = False
+    lowered = message.lower()
+    if "rate limit" in lowered or "429" in lowered:
+        kind = "rate_limit"
+        retry_after = _parse_retry_after(message)
+        # Per-day and per-minute limits need completely different advice:
+        # one is "wait a moment", the other is "you are done for today".
+        daily = "per day" in lowered or "tpd" in lowered
+    elif "empty" in lowered:
+        kind = "empty_response"
+    elif "auth" in lowered or "401" in lowered or "api key" in lowered:
+        kind = "auth"
+    _llm_errors.append({
+        "agent": agent, "kind": kind, "message": message[:400],
+        "retry_after": retry_after, "daily": daily,
+    })
+    logger.error(f"[{agent}] LLM {kind}: {message[:200]}")
+
+
+def drain_llm_errors() -> list:
+    """Return and clear the errors recorded since the last drain."""
+    out = list(_llm_errors)
+    _llm_errors.clear()
+    return out
+
 
 class BaseAgent:
     """
@@ -77,7 +143,7 @@ class BaseAgent:
 
     def __init__(self, agent_name: str) -> None:
         self.agent_name = agent_name
-        self.llm = get_llm()  # Groq Llama 3.3 70B
+        self.llm = get_llm()  # Groq-hosted chat model (see LLM_MODEL)
         self.retriever = get_retriever()  # HybridRetriever singleton
         logger.info(f"[{self.agent_name}] Initialised")
 
@@ -86,22 +152,52 @@ class BaseAgent:
         Safely invoke an LCEL chain and return the raw string output.
         Catches exceptions and returns an error JSON so downstream
         parsers can handle the failure gracefully rather than crashing.
+
+        The Langfuse callback handler is attached here, which is the only
+        place it can be: without it the chain runs untraced and Langfuse sees
+        a trace envelope with no prompts, completions, token counts or
+        latencies inside it.
         """
+        config = get_tracer().langchain_config(
+            run_name=self.agent_name,
+            metadata={"agent": self.agent_name},
+        )
         try:
-            result = chain.invoke(inputs)
-            # StrOutputParser returns str; other parsers return objects
-            return result if isinstance(result, str) else str(result)
+            result = chain.invoke(inputs, config=config)
+            text = result if isinstance(result, str) else str(result)
+
+            # An empty completion is a failure, not an answer. This model
+            # spends "reasoning tokens" before it emits any content, so a
+            # response truncated by max_tokens comes back as "" — which the
+            # parser would turn into a None section with no explanation.
+            if not text.strip():
+                record_llm_error(
+                    self.agent_name,
+                    "Model returned an empty response (the token budget was "
+                    "likely consumed before any output was produced).",
+                )
+                return json.dumps({"error": "empty response", "confidence": 0.0})
+
+            return text
         except Exception as e:
-            logger.error(f"[{self.agent_name}] LLM invocation failed: {e}")
+            record_llm_error(self.agent_name, str(e))
             return json.dumps({"error": str(e), "confidence": 0.0})
 
-    def _get_rag_context(self, query: str) -> str:
-        """Retrieve relevant travel knowledge for a query."""
+    def _get_rag_context(self, query: str, destination: Optional[str] = None):
+        """
+        Retrieve relevant travel knowledge for a query.
+
+        Returns a RetrievalResult, which stringifies to the context text but
+        also carries `.grounded` — False when nothing in the knowledge base
+        cleared the relevance floor, in which case the context is an explicit
+        instruction to fall back on the model's own knowledge rather than
+        borrowed facts about another destination.
+        """
         try:
-            return self.retriever.retrieve(query)
+            return self.retriever.retrieve(query, destination=destination)
         except Exception as e:
             logger.warning(f"[{self.agent_name}] RAG retrieval failed: {e}")
-            return "No additional context available."
+            return RetrievalResult(NO_CONTEXT_NOTICE, grounded=False)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -136,27 +232,52 @@ class RetrievalAgent(BaseAgent):
         """
         dest = request.destination
 
-        # Three targeted queries cover the information needs of all 5 agents
-        general_context = self._get_rag_context(
-            f"{dest} travel guide attractions culture transport visa tips"
+        # Three targeted queries cover the information needs of all 5 agents.
+        # Phrased as natural questions rather than keyword soup: the reranker
+        # is a cross encoder trained on question/passage pairs, and scores
+        # keyword strings far lower, which would gate out genuine matches.
+        general = self._get_rag_context(
+            f"What should a traveller know about visiting {dest}?", destination=dest
         )
-        hotel_context = self._get_rag_context(
-            f"{dest} hotels accommodation best areas neighbourhoods stay"
+        hotel = self._get_rag_context(
+            f"Where should I stay in {dest} and what do hotels cost?", destination=dest
         )
-        food_context = self._get_rag_context(
-            f"{dest} food cuisine restaurants local dishes must-eat"
+        food = self._get_rag_context(
+            f"What food and restaurants is {dest} known for?", destination=dest
         )
 
-        logger.info(
-            f"[RetrievalAgent] Retrieved context | "
-            f"general={len(general_context)}ch hotel={len(hotel_context)}ch "
-            f"food={len(food_context)}ch"
-        )
+        grounded = {
+            "general": general.grounded,
+            "hotel": hotel.grounded,
+            "food": food.grounded,
+        }
+        n_grounded = sum(grounded.values())
+
+        if n_grounded == 0:
+            logger.warning(
+                f"[RetrievalAgent] NO grounding for '{dest}' — the knowledge base "
+                f"has nothing relevant. Agents will fall back to model knowledge, "
+                f"which is recorded on the plan."
+            )
+        else:
+            logger.info(
+                f"[RetrievalAgent] Retrieved context | grounded {n_grounded}/3 | "
+                f"general={len(general.context)}ch hotel={len(hotel.context)}ch "
+                f"food={len(food.context)}ch"
+            )
 
         return {
-            "general_context": general_context,
-            "hotel_context": hotel_context,
-            "food_context": food_context,
+            "general_context": general.context,
+            "hotel_context": hotel.context,
+            "food_context": food.context,
+            # Grounding telemetry — consumed by guardrails, the plan and the UI.
+            "grounded": grounded,
+            "grounded_count": n_grounded,
+            "top_scores": {
+                "general": general.top_score,
+                "hotel": hotel.top_score,
+                "food": food.top_score,
+            },
         }
 
 
@@ -231,8 +352,14 @@ class ToolAgent(BaseAgent):
         return result
 
     def run(self, request: TravelRequest) -> Dict[str, str]:
-        """Execute all relevant tool calls and return bundled results."""
-        return {
+        """
+        Execute all relevant tool calls and return bundled results.
+
+        The bundle also carries a `data_sources` map ({tool: live|curated|mock})
+        read off each payload's provenance stamp, so downstream guardrails and
+        the UI can tell a real forecast from a fixture.
+        """
+        bundle = {
             "weather_data": self.get_weather_data(request.destination),
             "maps_data": self.get_maps_data(request.origin, request.destination),
             "hotel_data": self.get_hotel_data(
@@ -249,6 +376,20 @@ class ToolAgent(BaseAgent):
             ),
         }
 
+        sources = {
+            key.replace("_data", ""): source_of(raw)
+            for key, raw in bundle.items()
+        }
+        bundle["data_sources"] = sources
+
+        mocked = [name for name, src in sources.items() if src == SOURCE_MOCK]
+        if mocked:
+            logger.warning(
+                f"[ToolAgent] {len(mocked)}/{len(sources)} tools returned FIXTURE data "
+                f"(no API key or call failed): {', '.join(mocked)}"
+            )
+        return bundle
+
 
 # ══════════════════════════════════════════════════════════════
 # 3. WEATHER AGENT
@@ -259,7 +400,7 @@ class WeatherAgent(BaseAgent):
     Produces a structured WeatherOutput by combining:
       • Live weather data from WeatherTool (via ToolAgent)
       • Destination climate knowledge from RAG
-      • Llama 3.3 70B reasoning to complete the analysis
+      • LLM reasoning to complete the analysis
     """
 
     def __init__(self) -> None:
@@ -542,6 +683,89 @@ class FoodAgent(BaseAgent):
 # 8. FINAL PLANNER AGENT
 # ══════════════════════════════════════════════════════════════
 
+# ── Compact digests for the synthesis prompt ─────────────────
+# Each returns a few dense lines instead of a full JSON dump. Together they
+# take the final planner's prompt from ~8,000 tokens (over the per-request
+# limit) to roughly 900, which is what makes the call possible at all.
+
+def _digest_route(route) -> str:
+    if not route:
+        return "Not available"
+    days = "\n".join(
+        f"  Day {d.day} ({d.date}): {', '.join(d.activities[:3])} "
+        f"| {d.transportation} | {d.accommodation} | ${d.estimated_cost_usd:.0f}"
+        for d in route.day_wise_itinerary
+    )
+    return (
+        f"{route.origin} to {route.destination}, {route.total_days} days, "
+        f"{route.distance_km:.0f} km. {route.best_route_summary}\n"
+        f"Transport: {', '.join(route.transportation_options[:4])}\n{days}"
+    )
+
+
+def _digest_weather(weather) -> str:
+    if not weather:
+        return "Not available"
+    warnings = "; ".join(weather.travel_warnings[:3]) or "none"
+    return (
+        f"{weather.condition}, {weather.current_temp_celsius:g}C, "
+        f"humidity {weather.humidity_percent}%, wind {weather.wind_speed_kmh:.0f} km/h. "
+        f"Warnings: {warnings}. "
+        f"Pack: {', '.join(weather.clothing_suggestions[:4])}. "
+        f"Best months: {', '.join(weather.best_travel_months[:4])}"
+    )
+
+
+def _digest_hotels(hotels) -> str:
+    if not hotels:
+        return "Not available"
+    def tier(label, group):
+        if not group:
+            return ""
+        picks = "; ".join(
+            f"{h.name} ${h.price_per_night_usd:.0f}/night ({h.rating:g}*)"
+            for h in group[:3]
+        )
+        return f"\n  {label}: {picks}"
+    return (
+        f"{hotels.total_nights} nights, {hotels.check_in} to {hotels.check_out}. "
+        f"Recommended area: {hotels.recommended_area}."
+        + tier("Budget", hotels.budget_hotels)
+        + tier("Premium", hotels.premium_hotels)
+        + tier("Family", hotels.family_hotels)
+    )
+
+
+def _digest_budget(budget) -> str:
+    if not budget:
+        return "Not available"
+    b = budget.per_person_breakdown
+    return (
+        f"Tier {budget.budget_tier}, {budget.trip_days} days, "
+        f"{budget.travellers} traveller(s). "
+        f"Per person: flights ${b.flights_usd:.0f}, stay ${b.accommodation_usd:.0f}, "
+        f"food ${b.food_usd:.0f}, transport ${b.local_transport_usd:.0f}, "
+        f"activities ${b.activities_usd:.0f}, other ${b.miscellaneous_usd:.0f}, "
+        f"total ${b.total_usd:.0f}. "
+        f"TRIP TOTAL ${budget.total_trip_cost_usd:.0f}. {budget.currency_info}"
+    )
+
+
+def _digest_food(food) -> str:
+    if not food:
+        return "Not available"
+    places = "; ".join(
+        f"{r.name} ({r.cuisine_type}, {r.price_range})"
+        for r in food.restaurant_suggestions[:4]
+    )
+    return (
+        f"Average meal ${food.average_meal_cost_usd:.0f}/person. "
+        f"Specialities: {', '.join(food.local_specialties[:5])}. "
+        f"Vegetarian: {', '.join(food.vegetarian_dishes[:4])}. "
+        f"Restaurants: {places}"
+    )
+
+
 class FinalPlannerAgent(BaseAgent):
     """
     Synthesis agent that combines outputs from all 5 specialist
@@ -556,6 +780,11 @@ class FinalPlannerAgent(BaseAgent):
 
     def __init__(self) -> None:
         super().__init__("FinalPlannerAgent")
+        # Groq counts reserved output tokens toward the per-request budget, so
+        # the default 4,096 was consuming half the 8,000 TPM ceiling for a
+        # reply that is three short fields. Reserving what the response
+        # actually needs keeps the request comfortably inside the limit.
+        self.llm = get_llm(max_tokens=1200)
         self._chain = final_planner_prompt | self.llm | StrOutputParser()
 
     def run(
@@ -567,70 +796,115 @@ class FinalPlannerAgent(BaseAgent):
         budget: Optional[BudgetOutput],
         food: Optional[FoodOutput],
         warnings: list,
+        data_sources: Optional[dict] = None,
+        rag_grounding: Optional[dict] = None,
     ) -> Optional[TravelPlan]:
         """
         Compile the final TravelPlan.
 
+        The plan is always assembled in Python from the request and the five
+        sub-outputs; the LLM only supplies the executive summary, the overall
+        confidence and any cross-section inconsistencies it spotted. That split
+        means a bad LLM response degrades to a plainer summary instead of
+        discarding the whole synthesis.
+
         Parameters
         ----------
-        request  : Original user request
-        route    : RouteAgent output
-        weather  : WeatherAgent output
-        hotels   : HotelAgent output
-        budget   : BudgetAgent output
-        food     : FoodAgent output
-        warnings : Accumulated guardrail warnings
+        request      : Original user request
+        route        : RouteAgent output
+        weather      : WeatherAgent output
+        hotels       : HotelAgent output
+        budget       : BudgetAgent output
+        food         : FoodAgent output
+        warnings     : Accumulated guardrail warnings
+        data_sources : {tool: live|curated|mock} provenance from ToolAgent
 
         Returns
         -------
-        TravelPlan or None on failure
+        TravelPlan (never None — assembly cannot fail)
         """
         plan_id = str(uuid.uuid4())[:8].upper()
         created_at = datetime.utcnow().isoformat() + "Z"
+        data_sources = data_sources or {}
+        rag_grounding = rag_grounding or {}
 
         logger.info(f"[FinalPlannerAgent] Compiling plan {plan_id}")
 
-        # Serialise sub-outputs for prompt injection
-        def _safe_json(obj) -> str:
-            return obj.model_dump_json(indent=2) if obj else "Not available"
-
+        # Digest the sub-outputs rather than dumping them.
+        #
+        # This used to inject all five sub-plans as indented JSON, which came
+        # to ~8,000 tokens — over Groq's 8,000 tokens-per-minute ceiling for a
+        # single request. The API rejected it with HTTP 413 *every time*, so
+        # retries could never help and the synthesis silently fell back to a
+        # canned summary on every run.
+        #
+        # The model only has to write a summary, score confidence, and spot
+        # inconsistencies. It needs the facts, not the schema: names, numbers
+        # and dates, with no field names, brackets or pretty-printing.
         raw = self._invoke_llm(self._chain, {
-            "travel_request": request.model_dump_json(indent=2),
-            "route_data": _safe_json(route),
-            "weather_data": _safe_json(weather),
-            "hotel_data": _safe_json(hotels),
-            "budget_data": _safe_json(budget),
-            "food_data": _safe_json(food),
+            "travel_request": (
+                f"{request.origin} to {request.destination}, "
+                f"{request.departure_date} to {request.return_date}, "
+                f"{request.travellers} traveller(s), budget ${request.budget_usd:,.0f}, "
+                f"{request.travel_purpose}, {request.dietary_preference}, "
+                f"{request.accommodation_preference} accommodation"
+                + (f". Note: {request.special_requests}" if request.special_requests else "")
+            ),
+            "route_data": _digest_route(route),
+            "weather_data": _digest_weather(weather),
+            "hotel_data": _digest_hotels(hotels),
+            "budget_data": _digest_budget(budget),
+            "food_data": _digest_food(food),
             "plan_id": plan_id,
             "created_at": created_at,
         })
 
-        # Try to parse structured plan from LLM output
-        structured_plan = parse_travel_plan(raw)
+        synthesis = parse_plan_synthesis(raw)
 
-        if structured_plan:
-            # Attach sub-plans directly (avoids re-serialisation issues)
-            structured_plan.route = route
-            structured_plan.weather = weather
-            structured_plan.hotels = hotels
-            structured_plan.budget = budget
-            structured_plan.food = food
-            structured_plan.warnings = warnings
-            structured_plan.rag_context_used = True
-            logger.info(
-                f"[FinalPlannerAgent] Plan {plan_id} compiled | "
-                f"confidence={structured_plan.overall_confidence:.2f}"
-            )
-            return structured_plan
-
-        # Fallback: construct plan manually if LLM parse fails
-        logger.warning("[FinalPlannerAgent] LLM parse failed — constructing plan manually")
+        # Confidence computed from the sub-agents is the trustworthy floor;
+        # the LLM's self-assessment is only used when it actually parsed.
         confidences = [
             getattr(r, "confidence", 0.7)
             for r in [route, weather, hotels, budget, food]
             if r is not None
         ]
-        overall_conf = round(sum(confidences) / max(len(confidences), 1), 2)
+        computed_conf = round(sum(confidences) / max(len(confidences), 1), 2)
+
+        all_warnings = list(warnings)
+
+        if synthesis:
+            summary = synthesis.executive_summary
+            overall_conf = synthesis.overall_confidence
+            all_warnings.extend(
+                f"[Synthesis] {w}" for w in synthesis.consistency_warnings
+            )
+            logger.info(
+                f"[FinalPlannerAgent] Plan {plan_id} synthesised | "
+                f"confidence={overall_conf:.2f} | "
+                f"consistency_warnings={len(synthesis.consistency_warnings)}"
+            )
+        else:
+            logger.warning(
+                "[FinalPlannerAgent] Synthesis parse failed — "
+                "falling back to a generated summary"
+            )
+            summary = (
+                f"A {request.travel_purpose} trip from {request.origin} to "
+                f"{request.destination} for {request.travellers} traveller(s). "
+                f"The plan covers routes, accommodation, dining, and budget "
+                f"within your ${request.budget_usd:,.0f} total budget."
+            )
+            overall_conf = computed_conf
+
+        # A plan resting on fixtures must not advertise high confidence.
+        mocked = [k for k, v in data_sources.items() if v == "mock"]
+        if mocked and data_sources:
+            penalty = len(mocked) / len(data_sources)
+            overall_conf = round(overall_conf * (1.0 - 0.5 * penalty), 2)
+            logger.warning(
+                f"[FinalPlannerAgent] Confidence reduced to {overall_conf:.2f} — "
+                f"{len(mocked)}/{len(data_sources)} sources are simulated"
+            )
 
         return TravelPlan(
             plan_id=plan_id,
@@ -646,15 +920,13 @@ class FinalPlannerAgent(BaseAgent):
             hotels=hotels,
             budget=budget,
             food=food,
-            executive_summary=(
-                f"A {request.travel_purpose} trip from {request.origin} to "
-                f"{request.destination} for {request.travellers} traveller(s). "
-                f"The plan covers routes, accommodation, dining, and budget "
-                f"within your ${request.budget_usd:,.0f} total budget."
-            ),
+            executive_summary=summary,
             overall_confidence=overall_conf,
-            warnings=warnings,
-            rag_context_used=True,
+            warnings=all_warnings,
+            # Honest: True only if the KB actually had destination knowledge.
+            rag_context_used=any(rag_grounding.values()),
+            rag_grounding=rag_grounding,
+            data_sources=data_sources,
         )
 
 

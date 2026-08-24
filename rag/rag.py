@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import os
+import unicodedata
 from typing import List, Optional
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -44,6 +45,66 @@ from loguru import logger
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import rag_config
+
+
+# Metadata marker for chunks that apply to any trip (packing, insurance,
+# budgeting) rather than to one destination.
+GENERAL_KNOWLEDGE = "__general__"
+
+
+def _destination_key(name: str) -> str:
+    """
+    Normalise a destination for comparison: 'Paris, France' -> 'paris'.
+
+    Diacritics are stripped, because the corpus stores the title Wikivoyage
+    resolved to ('Reykjavík', 'Zürich') while a user types the plain ASCII
+    form. Without this the filter drops every chunk for exactly the cities
+    whose names carry accents.
+    """
+    base = (name or "").split(",")[0].strip().lower()
+    decomposed = unicodedata.normalize("NFKD", base)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def filter_by_destination(documents: List[Document], destination: str) -> List[Document]:
+    """
+    Drop chunks that are about a *different* destination.
+
+    This is the core grounding rule. A relevance score alone cannot express
+    "this passage is well written, on-topic for hotels, and about the wrong
+    city" — which is exactly the failure that had a Dubai itinerary quoting
+    Bali's dry season. Destination-tagged chunks must match; untagged and
+    general chunks always survive, because generic travel advice is useful
+    everywhere and misleads no one.
+    """
+    want = _destination_key(destination)
+    if not want:
+        return documents
+
+    kept, dropped = [], []
+    for doc in documents:
+        doc_dest = doc.metadata.get("destination")
+        # `alias` carries the name that was *requested* at ingest time when the
+        # wiki redirected to a different spelling (Marrakesh -> Marrakech), so
+        # either spelling finds the article.
+        alias = doc.metadata.get("destination_alias")
+        matches = (
+            not doc_dest
+            or doc_dest == GENERAL_KNOWLEDGE
+            or _destination_key(doc_dest) == want
+            or (alias and _destination_key(alias) == want)
+        )
+        if matches:
+            kept.append(doc)
+        else:
+            dropped.append(doc_dest)
+
+    if dropped:
+        logger.info(
+            f"[RAG] Dropped {len(dropped)} chunk(s) about other destinations "
+            f"({', '.join(sorted(set(dropped)))}) for '{destination}'"
+        )
+    return kept
 
 
 # ══════════════════════════════════════════════════════════════
@@ -159,14 +220,40 @@ def _get_synthetic_documents() -> List[Document]:
         "Traditional Balinese dance performances nightly.",
     ]
 
+    # Which destination each chunk is *about*, in the same order as above.
+    # GENERAL_KNOWLEDGE marks advice that applies to any trip. This is what
+    # lets retrieval distinguish "useful generic packing advice" from "facts
+    # about a city the traveller is not going to" — only the latter is
+    # actively misleading, and only the latter gets filtered out.
+    doc_destinations = [
+        "paris", "paris", "paris",
+        "tokyo", "tokyo",
+        "new york", "new york",
+        GENERAL_KNOWLEDGE, GENERAL_KNOWLEDGE, GENERAL_KNOWLEDGE,
+        "bangkok",
+        "bali",
+    ]
+    assert len(doc_destinations) == len(synthetic_texts), (
+        f"doc_destinations ({len(doc_destinations)}) must stay in step with "
+        f"synthetic_texts ({len(synthetic_texts)})"
+    )
+
     docs = [
         Document(
             page_content=text,
-            metadata={"source": "synthetic_travel_knowledge", "chunk_id": i}
+            metadata={
+                "source": "synthetic_travel_knowledge",
+                "chunk_id": i,
+                "destination": dest,
+            },
         )
-        for i, text in enumerate(synthetic_texts)
+        for i, (text, dest) in enumerate(zip(synthetic_texts, doc_destinations))
     ]
-    logger.info(f"[RAG] Created {len(docs)} synthetic knowledge documents")
+    covered = sorted({d for d in doc_destinations if d != GENERAL_KNOWLEDGE})
+    logger.info(
+        f"[RAG] Created {len(docs)} synthetic knowledge documents | "
+        f"destinations covered: {', '.join(covered)}"
+    )
     return docs
 
 
@@ -194,23 +281,122 @@ def build_vector_store(documents: List[Document]) -> Chroma:
 
     persist_dir = rag_config.persist_dir
 
-    # If a persisted store exists, load it; otherwise build from scratch
+    # If a persisted store exists, load it; otherwise build from scratch.
+    # Compatibility is checked with plain sqlite3 BEFORE any Chroma client
+    # touches the directory: chromadb caches its client per path and keeps the
+    # sqlite file open, so discovering the problem by catching an exception
+    # leaves the file locked and the directory only half-removable.
     if os.path.exists(persist_dir) and os.listdir(persist_dir):
-        logger.info(f"[RAG] Loading existing ChromaDB from {persist_dir}")
-        vector_store = Chroma(
-            persist_directory=persist_dir,
-            embedding_function=embeddings,
-        )
-    else:
-        logger.info(f"[RAG] Building new ChromaDB vector store…")
-        vector_store = Chroma.from_documents(
-            documents=documents,
-            embedding=embeddings,
-            persist_directory=persist_dir,
-        )
-        logger.info(f"[RAG] Vector store built and persisted at {persist_dir}")
+        if _persisted_store_is_compatible(persist_dir):
+            logger.info(f"[RAG] Loading existing ChromaDB from {persist_dir}")
+            try:
+                vector_store = Chroma(
+                    persist_directory=persist_dir,
+                    embedding_function=embeddings,
+                )
+                count = vector_store._collection.count()
+                logger.info(f"[RAG] Existing vector store OK | {count} vectors")
+                return vector_store
+            except Exception as e:
+                logger.warning(f"[RAG] Existing store failed to open ({e}) — rebuilding")
+        else:
+            logger.warning(
+                f"[RAG] Persisted store at {persist_dir} was written by an "
+                f"incompatible chromadb version — dense retrieval would silently "
+                f"return nothing and hybrid search would degrade to BM25-only. "
+                f"Rebuilding it from source documents."
+            )
+        _discard_persist_dir(persist_dir)
 
+    logger.info(f"[RAG] Building new ChromaDB vector store ({len(documents)} chunks)…")
+    vector_store = Chroma(
+        persist_directory=persist_dir,
+        embedding_function=embeddings,
+        # Embeddings are L2-normalised above, so cosine is the metric the
+        # score_threshold is meant to be read against. Chroma defaults to l2
+        # when this is unset, which silently changes what the threshold means.
+        collection_metadata={"hnsw:space": "cosine"},
+    )
+
+    # Chroma rejects any single insert above ~5.4k records (a SQLite variable
+    # limit), so a real corpus has to go in batches. Doing it in slices also
+    # keeps peak memory during embedding bounded.
+    batch = 2000
+    for start in range(0, len(documents), batch):
+        slice_ = documents[start:start + batch]
+        vector_store.add_documents(slice_)
+        logger.info(
+            f"[RAG]   indexed {min(start + batch, len(documents))}/{len(documents)}"
+        )
+
+    logger.info(
+        f"[RAG] Vector store built and persisted at {persist_dir} "
+        f"| {len(documents)} documents | space=cosine"
+    )
     return vector_store
+
+
+def _persisted_store_is_compatible(persist_dir: str) -> bool:
+    """
+    Can the *installed* chromadb read this directory?
+
+    Checked by reading chroma.sqlite3 directly, read-only, with no chromadb
+    involvement — so a "no" leaves nothing open and the directory stays
+    deletable. chromadb < 0.6 stores `max_seq_id.seq_id` as an 8/24-byte BLOB
+    and decodes it with `len()`; newer versions write a plain INTEGER, which
+    makes every query raise `TypeError: object of type 'int' has no len()`.
+    """
+    db_path = os.path.join(persist_dir, "chroma.sqlite3")
+    if not os.path.exists(db_path):
+        return False
+
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = con.execute("SELECT seq_id FROM max_seq_id LIMIT 1").fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        logger.debug(f"[RAG] Could not inspect {db_path}: {e}")
+        return False
+
+    if row is None:
+        return True  # no rows to decode; nothing can break
+
+    compatible = isinstance(row[0], (bytes, bytearray))
+    if not compatible:
+        logger.debug(
+            f"[RAG] max_seq_id.seq_id is {type(row[0]).__name__}, "
+            "expected bytes — store predates/postdates installed chromadb"
+        )
+    return compatible
+
+
+def _discard_persist_dir(persist_dir: str) -> None:
+    """
+    Remove an unusable Chroma directory so it can be rebuilt.
+
+    The contents are fully regenerable from the source documents, so deleting
+    is safe. If the OS holds the files open (common on Windows), rename the
+    directory aside rather than failing the whole run.
+    """
+    import shutil
+    try:
+        shutil.rmtree(persist_dir)
+        logger.info(f"[RAG] Removed stale vector store at {persist_dir}")
+    except Exception as e:
+        fallback = f"{persist_dir}.broken"
+        try:
+            if os.path.exists(fallback):
+                shutil.rmtree(fallback, ignore_errors=True)
+            os.rename(persist_dir, fallback)
+            logger.warning(f"[RAG] Could not delete ({e}) — moved aside to {fallback}")
+        except Exception as e2:
+            logger.error(
+                f"[RAG] Could not clear {persist_dir} ({e2}). "
+                "Delete it by hand and re-run."
+            )
 
 
 # ══════════════════════════════════════════════════════════════
@@ -284,6 +470,124 @@ def reciprocal_rank_fusion(
 
 
 # ══════════════════════════════════════════════════════════════
+# SECTION 4b — Cross-Encoder Reranking
+# ══════════════════════════════════════════════════════════════
+# RRF only knows rank positions — it never compares the query against the
+# passage text. On a small corpus that means the top-5 is always returned,
+# however unrelated, so a Dubai query gets confidently answered with Bali
+# facts. A cross encoder reads (query, passage) jointly and produces a
+# calibrated relevance logit, which gives us a usable "nothing here is
+# relevant" signal.
+
+_reranker = None
+_reranker_failed = False
+
+
+def get_reranker():
+    """
+    Lazily load the cross-encoder. Returns None if reranking is disabled or
+    the model cannot be loaded (offline, missing torch, etc.) — retrieval then
+    degrades to plain RRF rather than breaking the pipeline.
+    """
+    global _reranker, _reranker_failed
+    if not rag_config.rerank_enabled or _reranker_failed:
+        return None
+    if _reranker is None:
+        try:
+            from sentence_transformers import CrossEncoder
+            logger.info(f"[RAG] Loading reranker: {rag_config.rerank_model}")
+            _reranker = CrossEncoder(rag_config.rerank_model, max_length=512)
+            logger.info("[RAG] Reranker ready")
+        except Exception as e:
+            _reranker_failed = True
+            logger.warning(
+                f"[RAG] Reranker unavailable ({e}) — falling back to RRF order. "
+                "Relevance gating will be disabled."
+            )
+            return None
+    return _reranker
+
+
+def rerank(query: str, documents: List[Document]) -> List[tuple]:
+    """
+    Score each document against the query with the cross encoder.
+
+    Returns
+    -------
+    List of (Document, score) sorted by descending score. When the reranker
+    is unavailable the original order is preserved with score None, so callers
+    must treat a None score as "unknown relevance", not "irrelevant".
+    """
+    if not documents:
+        return []
+
+    model = get_reranker()
+    if model is None:
+        return [(d, None) for d in documents]
+
+    try:
+        pairs = [(query, d.page_content) for d in documents]
+        scores = model.predict(pairs)
+        ranked = sorted(
+            zip(documents, (float(s) for s in scores)),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        return ranked
+    except Exception as e:
+        logger.warning(f"[RAG] Rerank failed ({e}) — keeping fusion order")
+        return [(d, None) for d in documents]
+
+
+class RetrievalResult:
+    """
+    Outcome of one retrieval, carrying the honesty signal alongside the text.
+
+    grounded : True only when at least one passage cleared the relevance floor.
+               When False, `context` explicitly tells the agent the knowledge
+               base has nothing on this destination, instead of handing it
+               unrelated passages that read as authoritative.
+    """
+
+    def __init__(
+        self,
+        context: str,
+        grounded: bool,
+        scores: Optional[List[float]] = None,
+        n_considered: int = 0,
+    ) -> None:
+        self.context = context
+        self.grounded = grounded
+        self.scores = scores or []
+        self.n_considered = n_considered
+
+    @property
+    def top_score(self) -> Optional[float]:
+        return max(self.scores) if self.scores else None
+
+    def __str__(self) -> str:  # so existing str(...) call sites keep working
+        return self.context
+
+    def __repr__(self) -> str:
+        return (
+            f"RetrievalResult(grounded={self.grounded}, "
+            f"kept={len(self.scores)}/{self.n_considered}, "
+            f"top_score={self.top_score})"
+        )
+
+
+# Text handed to an agent when the knowledge base has nothing relevant. Being
+# explicit matters: the model reliably falls back on its own knowledge, whereas
+# unrelated context actively pulls the answer toward the wrong destination.
+NO_CONTEXT_NOTICE = (
+    "No destination-specific knowledge was found in the travel knowledge base "
+    "for this query. Do NOT use facts about other destinations. Rely on your "
+    "own general knowledge of this destination, and keep claims general where "
+    "you are uncertain."
+)
+
+
+# ══════════════════════════════════════════════════════════════
 # SECTION 5 — HybridRetriever (Main Entry Point)
 # ══════════════════════════════════════════════════════════════
 
@@ -310,20 +614,33 @@ class HybridRetriever:
             project_root = os.path.dirname(os.path.dirname(__file__))
             pdf_path = os.path.join(project_root, "data", "travel_data.pdf")
 
-        # Load and chunk documents
-        self.documents = load_and_chunk_documents(pdf_path)
+        # Source priority: an ingested Wikivoyage corpus, then a PDF, then the
+        # small hand-written fallback.
+        #
+        # Loading the *persisted* corpus matters for correctness, not just
+        # convenience: BM25 is built in-process from `self.documents` while
+        # Chroma reads its own on-disk index. If those two come from different
+        # sources they drift apart, and the hybrid silently fuses two rankings
+        # over different corpora. Reading both from corpus.jsonl keeps them
+        # in step.
+        self.documents = self._load_documents(pdf_path)
 
         # Build both retrievers
         self.vector_store = build_vector_store(self.documents)
         self.bm25 = build_bm25_retriever(self.documents)
 
-        # Build the dense retriever from the vector store
+        # Build the dense retriever from the vector store.
+        #
+        # Deliberately plain `similarity` with a wide k, NOT
+        # `similarity_score_threshold`. Relevance is now decided downstream by
+        # the cross encoder, which reads the query and passage together and is
+        # far better at it than a cosine cutoff. Pre-filtering here only threw
+        # away candidates before they could be scored properly — with the old
+        # 0.3 threshold, whole queries returned zero dense hits and the hybrid
+        # quietly became BM25-only.
         self.dense_retriever = self.vector_store.as_retriever(
-            search_type="similarity_score_threshold",
-            search_kwargs={
-                "k": rag_config.top_k,
-                "score_threshold": rag_config.score_threshold,
-            },
+            search_type="similarity",
+            search_kwargs={"k": rag_config.rerank_candidates},
         )
 
         self._top_k = rag_config.top_k
@@ -332,24 +649,59 @@ class HybridRetriever:
             f"top_k={self._top_k}"
         )
 
-    def retrieve(self, query: str) -> str:
+    @staticmethod
+    def _load_documents(pdf_path: str) -> List[Document]:
+        """Prefer the ingested corpus; fall back to PDF, then synthetic."""
+        try:
+            from rag.ingest import load_corpus, corpus_path
+            corpus = load_corpus()
+            if corpus:
+                covered = len({
+                    d.metadata.get("destination") for d in corpus
+                    if d.metadata.get("destination") != GENERAL_KNOWLEDGE
+                })
+                logger.info(
+                    f"[RAG] Loaded ingested corpus | {len(corpus)} chunks, "
+                    f"{covered} destinations ({corpus_path()})"
+                )
+                return corpus
+        except Exception as e:
+            logger.warning(f"[RAG] Could not load ingested corpus ({e})")
+
+        logger.info(
+            "[RAG] No ingested corpus found — falling back. "
+            "Build one with: python -m rag.ingest"
+        )
+        return load_and_chunk_documents(pdf_path)
+
+    def retrieve(self, query: str, destination: Optional[str] = None) -> RetrievalResult:
         """
-        Run hybrid retrieval for a query and return formatted context string.
+        Run hybrid retrieval for a query and return context plus a grounding flag.
 
         Flow:
         1. Dense retrieval (embedding similarity)
         2. Sparse retrieval (BM25 keyword)
         3. Reciprocal Rank Fusion merge
-        4. Trim to top_k results
-        5. Format as numbered context string
+        4. Cross-encoder rerank of the fused candidates
+        5. Drop anything below the relevance floor
+        6. Format the survivors, or return an explicit "nothing relevant" notice
+
+        Step 5 is the important one. Without it the retriever always returns
+        its top_k, so an out-of-corpus destination silently receives another
+        city's facts. Returning nothing is strictly better than returning
+        something wrong.
 
         Parameters
         ----------
-        query : The search query (e.g., "best hotels in Bali under $100")
+        query       : The search query (e.g., "best hotels in Bali under $100")
+        destination : When given, chunks tagged with a *different* destination
+                      are removed before scoring, and `grounded` reports
+                      whether any destination-specific knowledge survived.
 
         Returns
         -------
-        Formatted multi-line string ready to inject into a prompt.
+        RetrievalResult — stringifies to the context, but also carries
+        `.grounded` and the per-passage relevance scores.
         """
         logger.info(f"[RAG] Retrieving: '{query}'")
 
@@ -375,21 +727,86 @@ class HybridRetriever:
             sparse_weight=rag_config.bm25_weight,
         )
 
-        # Take top-k
-        top_docs = merged[: self._top_k]
-
-        if not top_docs:
+        if not merged:
             logger.warning("[RAG] No documents retrieved — returning empty context")
-            return "No relevant travel knowledge found for this query."
+            return RetrievalResult(NO_CONTEXT_NOTICE, grounded=False)
 
-        # Format for prompt injection
+        # Drop other destinations' facts BEFORE scoring. A passage about the
+        # wrong city can be perfectly relevant to the question and still be
+        # the single worst thing to put in front of the model.
+        if destination:
+            merged = filter_by_destination(merged, destination)
+            if not merged:
+                logger.warning(
+                    f"[RAG] NOT GROUNDED — knowledge base has nothing about "
+                    f"'{destination}'"
+                )
+                return RetrievalResult(NO_CONTEXT_NOTICE, grounded=False)
+
+        # Rerank the fused candidates, then gate on absolute relevance
+        candidates = merged[: rag_config.rerank_candidates]
+        ranked = rerank(query, candidates)
+
+        floor = rag_config.rerank_min_score
+        scored = [(d, s) for d, s in ranked if s is not None]
+
+        if scored:
+            kept = [(d, s) for d, s in scored if s >= floor][: self._top_k]
+            if not kept:
+                best = scored[0][1]
+                logger.warning(
+                    f"[RAG] NOT GROUNDED — no passage cleared the relevance floor "
+                    f"({floor}); best score {best:.2f} over "
+                    f"{len(scored)} candidates. Returning the no-context notice "
+                    f"instead of unrelated passages."
+                )
+                return RetrievalResult(
+                    NO_CONTEXT_NOTICE,
+                    grounded=False,
+                    scores=[best],
+                    n_considered=len(scored),
+                )
+        else:
+            # Reranker unavailable — fall back to fusion order, relevance unknown.
+            kept = [(d, None) for d in candidates[: self._top_k]]
+
+        # "Grounded" means we found knowledge about THIS destination. Generic
+        # travel advice is worth passing along, but it is not grounding, and
+        # counting it as such is how a plan ends up looking better sourced
+        # than it actually is.
+        def _is_specific(doc) -> bool:
+            return doc.metadata.get("destination") not in (None, GENERAL_KNOWLEDGE)
+
+        specific = [(d, s) for d, s in kept if _is_specific(d)]
+        grounded = bool(specific)
+
+        # Label each passage so the model knows what it is reading. Unlabelled
+        # context invites it to treat generic budgeting advice as a fact about
+        # the destination.
         context_lines = [
-            f"[Context {i+1}] {doc.page_content}"
-            for i, doc in enumerate(top_docs)
+            f"[Context {i+1} — "
+            f"{'about ' + doc.metadata['destination'] if _is_specific(doc) else 'general travel advice'}] "
+            f"{doc.page_content}"
+            for i, (doc, _) in enumerate(kept)
         ]
+        if not grounded:
+            context_lines.insert(0, f"[Note] {NO_CONTEXT_NOTICE}")
+
         context = "\n\n".join(context_lines)
-        logger.info(f"[RAG] Retrieved {len(top_docs)} context chunks")
-        return context
+        scores = [s for _, s in kept if s is not None]
+
+        logger.info(
+            f"[RAG] {'GROUNDED' if grounded else 'GENERIC-ONLY'} — kept "
+            f"{len(kept)}/{len(ranked)} passages "
+            f"({len(specific)} destination-specific)"
+            + (f" | scores {[round(s, 2) for s in scores]}" if scores else " | rerank off")
+        )
+        return RetrievalResult(
+            context,
+            grounded=grounded,
+            scores=scores,
+            n_considered=len(ranked),
+        )
 
     def add_documents(self, texts: List[str]) -> None:
         """
@@ -424,6 +841,12 @@ def get_retriever() -> HybridRetriever:
 
 __all__ = [
     "HybridRetriever",
+    "GENERAL_KNOWLEDGE",
+    "filter_by_destination",
+    "RetrievalResult",
+    "NO_CONTEXT_NOTICE",
+    "rerank",
+    "get_reranker",
     "get_retriever",
     "load_and_chunk_documents",
     "build_vector_store",

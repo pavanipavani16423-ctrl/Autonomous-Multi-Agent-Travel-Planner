@@ -29,7 +29,7 @@ logger.info("Environment variables loaded from .env")
 @dataclass
 class LLMConfig:
     """
-    Holds every knob related to the Groq-hosted Llama model.
+    Holds every knob related to the Groq-hosted LLM.
 
     groq_api_key  : authenticates requests to Groq's inference API.
     model_name    : selects the exact model checkpoint.
@@ -43,7 +43,7 @@ class LLMConfig:
         default_factory=lambda: os.getenv("GROQ_API_KEY", "")
     )
     model_name: str = field(
-        default_factory=lambda: os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        default_factory=lambda: os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
     )
     temperature: float = field(
         default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.3"))

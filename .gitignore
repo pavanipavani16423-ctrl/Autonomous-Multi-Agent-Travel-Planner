@@ -20,3 +20,31 @@ env/
 build/
 dist/
 *.egg-info/
+
+# Chroma index: a build artefact, rebuilt from data/corpus.jsonl.
+# Never commit it — a store written by a different chromadb version is
+# unreadable and silently breaks dense retrieval.
+chroma_db/
+
+# data/corpus.jsonl IS committed on purpose: it lets the Docker image build
+# the index offline and makes deploys reproducible. Refresh it with
+#   python -m rag.ingest
+
+# Local run history — plans, metrics and graph checkpoints for THIS machine.
+# Not shared state: committing it would push one developer's trip history to
+# everyone, and the schema is recreated automatically on first run.
+data/memory.db
+data/checkpoints.db
+data/*.db
+
+# Superseded UI, kept locally while the redesign settles.
+app_old_backup.py
+
+# Private keys and certificates. A .pem in the working folder is one
+# `git add -A` away from being public, and a leaked key cannot be
+# un-leaked - it has to be revoked and reissued.
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*

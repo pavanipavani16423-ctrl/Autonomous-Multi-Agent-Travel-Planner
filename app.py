@@ -1,10 +1,22 @@
 # ============================================================
-# app.py — AI Multi-Agent Travel Planner
-# Fixed: All invisible text colors corrected
+# app.py — Travel planner web app
 # ============================================================
-import streamlit as st
-import sys, os, time, json
+# Structured as a product, not a demo of its own architecture:
+#
+#   landing (hero + search)  →  planning (progress)  →  plan (results)
+#
+# Session state drives the transition so it reads as pages rather than as a
+# sidebar that reruns a script. Nothing in the UI mentions agents, models,
+# frameworks or vector stores — none of that is a reason to plan a trip, and
+# a traveller has no way to act on it.
+# ============================================================
+
+import os
+import sys
+import time
 from datetime import date, timedelta
+
+import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -13,738 +25,767 @@ load_dotenv()
 
 from models.models import TravelRequest
 from graph.graph import run_travel_pipeline
-
-from langfuse_setup import (
-    LANGFUSE_ENABLED,
-    get_tracer,
-    get_langfuse_handler,
-    flush_langfuse,
-)
+from memory.store import recent_runs
+from langfuse_setup import get_tracer, flush_langfuse
+from ui.theme import CSS
+from ui.pdf import build_itinerary_pdf
 
 tracer = get_tracer()
 
 st.set_page_config(
-    page_title="✈️ AI Multi-Agent Travel Planner",
-    page_icon="✈️", layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="Voyager · AI Travel Planner",
+    page_icon="🧭",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
+st.markdown(CSS, unsafe_allow_html=True)
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
-
-html,body,[class*="css"]{
-    background:#020818 !important;
-    color:#e2e8f0;
-    font-family:'Rajdhani',sans-serif;
-}
-.stApp{
-    background:
-        radial-gradient(ellipse at 15% 50%,rgba(120,40,200,0.12) 0%,transparent 50%),
-        radial-gradient(ellipse at 85% 20%,rgba(59,130,246,0.1) 0%,transparent 50%),
-        linear-gradient(135deg,#020818 0%,#040d24 60%,#020818 100%) !important;
-    background-attachment:fixed !important;
-}
-section[data-testid="stSidebar"]{
-    background:linear-gradient(180deg,#060d28 0%,#030920 100%) !important;
-    border-right:1px solid rgba(100,80,200,0.3) !important;
-}
-section[data-testid="stSidebar"]>div{background:transparent !important;}
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] p{color:#93c5fd !important;font-weight:600 !important;}
-section[data-testid="stSidebar"] input,
-section[data-testid="stSidebar"] textarea{
-    background:#0a1428 !important;color:#e2e8f0 !important;
-    border:1px solid rgba(100,80,200,0.4) !important;border-radius:8px !important;
-}
-section[data-testid="stSidebar"] input::placeholder,
-section[data-testid="stSidebar"] textarea::placeholder{color:#94a3b8 !important;}
-section[data-testid="stSidebar"] [data-baseweb="select"]>div,
-section[data-testid="stSidebar"] [data-baseweb="select"]>div>div{
-    background:#0a1428 !important;color:#e2e8f0 !important;
-    border:1px solid rgba(100,80,200,0.4) !important;border-radius:8px !important;
-}
-section[data-testid="stSidebar"] [data-baseweb="select"] span,
-section[data-testid="stSidebar"] [data-baseweb="select"] div{
-    color:#e2e8f0 !important;background:transparent !important;
-}
-[data-baseweb="popover"] ul,[data-baseweb="menu"]{
-    background:#0a1428 !important;border:1px solid rgba(100,80,200,0.4) !important;
-}
-[data-baseweb="menu"] li,[data-baseweb="option"]{
-    background:#0a1428 !important;color:#e2e8f0 !important;
-}
-[data-baseweb="menu"] li:hover,[data-baseweb="option"]:hover{
-    background:#1e1060 !important;color:#a78bfa !important;
-}
-section[data-testid="stSidebar"] [data-testid="stNumberInput"] input{
-    background:#0a1428 !important;color:#e2e8f0 !important;
-    border:1px solid rgba(100,80,200,0.4) !important;
-}
-section[data-testid="stSidebar"] [data-testid="stNumberInput"] button{
-    background:#1e1060 !important;color:#e2e8f0 !important;
-    border:1px solid rgba(100,80,200,0.3) !important;
-}
-section[data-testid="stSidebar"] [data-testid="stDateInput"] input,
-section[data-testid="stSidebar"] [data-testid="stDateInput"]>div>div{
-    background:#0a1428 !important;color:#e2e8f0 !important;
-    border:1px solid rgba(100,80,200,0.4) !important;border-radius:8px !important;
-}
-section[data-testid="stSidebar"] [data-testid="stExpander"]{
-    background:rgba(10,20,40,0.8) !important;
-    border:1px solid rgba(100,80,200,0.25) !important;border-radius:8px !important;
-}
-section[data-testid="stSidebar"] [data-testid="stExpander"] summary{color:#93c5fd !important;}
-section[data-testid="stSidebar"] pre,section[data-testid="stSidebar"] code{
-    background:#020c24 !important;color:#7dd3fc !important;
-    border:1px solid rgba(59,130,246,0.3) !important;
-    border-radius:6px !important;font-size:0.78rem !important;
-}
-section[data-testid="stSidebar"] hr{border-color:rgba(100,80,200,0.2) !important;}
-.hero-banner{
-    position:relative;
-    background:linear-gradient(135deg,#0a0520 0%,#0d0a3a 30%,#120840 60%,#0a0520 100%);
-    border-radius:20px;padding:0;margin-bottom:1.5rem;
-    border:1px solid rgba(120,80,255,0.4);
-    box-shadow:0 0 80px rgba(120,80,255,0.2),0 0 160px rgba(59,130,246,0.1);
-    overflow:hidden;min-height:380px;
-    display:flex;align-items:center;justify-content:center;
-}
-.hero-bg{
-    position:absolute;inset:0;
-    background:
-        radial-gradient(ellipse at 70% 40%,rgba(120,80,255,0.25) 0%,transparent 55%),
-        radial-gradient(ellipse at 30% 60%,rgba(59,130,246,0.15) 0%,transparent 50%);
-}
-.hero-grid{
-    position:absolute;inset:0;
-    background-image:
-        linear-gradient(rgba(120,80,255,0.06) 1px,transparent 1px),
-        linear-gradient(90deg,rgba(120,80,255,0.06) 1px,transparent 1px);
-    background-size:40px 40px;
-}
-.hero-content{position:relative;z-index:2;text-align:center;padding:3rem 2rem;width:100%;}
-.hero-title-ai{
-    font-family:'Orbitron',sans-serif;font-size:5rem;font-weight:900;
-    background:linear-gradient(135deg,#60a5fa 0%,#a78bfa 50%,#34d399 100%);
-    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-    background-clip:text;line-height:1;margin:0;
-    filter:drop-shadow(0 0 30px rgba(120,80,255,0.6));
-}
-.hero-title-main{
-    font-family:'Orbitron',sans-serif;font-size:2.4rem;font-weight:700;
-    color:#e2e8f0;letter-spacing:4px;display:block;margin-top:0.2rem;
-}
-.hero-title-sub{
-    font-family:'Orbitron',sans-serif;font-size:2.4rem;font-weight:700;
-    background:linear-gradient(90deg,#60a5fa,#34d399);
-    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-    background-clip:text;letter-spacing:4px;display:block;
-}
-.hero-subtitle{
-    display:inline-block;background:rgba(30,20,80,0.7);
-    border:1px solid rgba(120,80,255,0.4);border-radius:30px;
-    padding:0.5rem 1.5rem;color:#a78bfa;font-size:1rem;
-    font-weight:600;letter-spacing:1px;margin:1rem 0;
-}
-/* FIX 1: hero tagline was #64748b — too dark */
-.hero-tagline{color:#94a3b8;font-size:0.9rem;font-style:italic;margin-bottom:1.2rem;}
-.hero-badge-row{margin:0.8rem 0;}
-.hero-badge{
-    display:inline-flex;align-items:center;gap:0.4rem;
-    background:rgba(20,10,60,0.8);border:1px solid rgba(120,80,255,0.5);
-    border-radius:25px;padding:0.35rem 1rem;color:#e2e8f0;
-    font-size:0.82rem;font-weight:600;margin:0.3rem;
-}
-.stat-bar{
-    background:rgba(10,15,40,0.9);border:1px solid rgba(120,80,255,0.3);
-    border-radius:12px;padding:1.2rem 2rem;margin-bottom:1.5rem;
-    display:flex;justify-content:space-around;align-items:center;flex-wrap:wrap;gap:1rem;
-}
-.stat-item{text-align:center;}
-.stat-value{font-family:'Orbitron',sans-serif;font-size:2rem;font-weight:700;display:block;}
-/* FIX 2: stat-label was #64748b — too dark */
-.stat-label{color:#94a3b8;font-size:0.8rem;font-weight:600;letter-spacing:1px;display:block;margin-top:0.2rem;}
-.tech-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin:0.5rem 0;}
-.tech-item{
-    background:rgba(20,10,60,0.6);border:1px solid rgba(100,80,200,0.3);
-    border-radius:8px;padding:0.6rem 0.3rem;text-align:center;
-}
-.tech-item .t-icon{font-size:1.4rem;display:block;}
-.tech-item .t-name{color:#93c5fd;font-size:0.7rem;font-weight:600;display:block;margin-top:0.2rem;}
-.sh{
-    background:linear-gradient(90deg,rgba(100,80,200,0.5) 0%,rgba(30,58,138,0.1) 100%);
-    padding:0.55rem 1rem;border-radius:8px;border-left:4px solid #7c3aed;
-    margin:1.2rem 0 0.6rem;font-size:1.05rem;font-weight:700;color:#c4b5fd;
-}
-.agent-card{
-    background:linear-gradient(135deg,#0a0f2e,#1a1060);border-radius:10px;
-    padding:0.75rem 1rem;margin:0.35rem 0;border-left:3px solid #7c3aed;
-    border-top:1px solid rgba(120,80,255,0.15);transition:all 0.3s;
-}
-.agent-card:hover{border-left-color:#a78bfa;box-shadow:0 4px 20px rgba(120,80,255,0.25);transform:translateX(4px);}
-.result-card{
-    background:linear-gradient(135deg,#0a0f2e,#1a1060);border-radius:12px;
-    padding:1.2rem;margin:0.6rem 0;border:1px solid rgba(120,80,255,0.25);
-}
-.hotel-budget  {border-left:4px solid #4ade80 !important;}
-.hotel-premium {border-left:4px solid #facc15 !important;}
-.hotel-family  {border-left:4px solid #a78bfa !important;}
-.lf-active{
-    background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.5);
-    border-radius:10px;padding:0.7rem;color:#4ade80;font-size:0.88rem;
-    text-align:center;font-weight:700;
-}
-.lf-inactive{
-    background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);
-    border-radius:10px;padding:0.7rem;color:#f87171;font-size:0.88rem;
-    text-align:center;font-weight:700;
-}
-.trace-card{
-    background:rgba(74,222,128,0.07);border:1px solid rgba(74,222,128,0.3);
-    border-radius:10px;padding:0.8rem 1rem;margin:0.5rem 0;
-    font-size:0.85rem;color:#86efac;
-}
-.stButton>button{
-    background:linear-gradient(135deg,#4f1d96,#6d28d9,#7c3aed) !important;
-    color:white !important;border:none !important;border-radius:12px !important;
-    font-weight:700 !important;letter-spacing:1.5px !important;
-    box-shadow:0 4px 20px rgba(109,40,217,0.6) !important;
-    font-family:'Rajdhani',sans-serif !important;transition:all 0.3s !important;
-}
-.stButton>button:hover{
-    background:linear-gradient(135deg,#6d28d9,#8b5cf6) !important;
-    box-shadow:0 8px 30px rgba(139,92,246,0.8) !important;
-    transform:translateY(-3px) !important;
-}
-.stTabs [data-baseweb="tab-list"]{background:rgba(10,10,30,0.8);border-radius:12px;padding:0.3rem;}
-/* FIX 3: tab color was #64748b — too dark */
-.stTabs [data-baseweb="tab"]{color:#94a3b8 !important;font-weight:600;border-radius:8px;}
-.stTabs [aria-selected="true"]{background:rgba(109,40,217,0.4) !important;color:#c4b5fd !important;}
-div[data-testid="stMetric"]{
-    background:linear-gradient(135deg,#0a0f2e,#1a1060);border-radius:10px;
-    padding:0.8rem;border:1px solid rgba(120,80,255,0.3);
-}
-div[data-testid="stMetricValue"]{color:#a78bfa !important;font-family:'Orbitron',sans-serif !important;}
-div[data-testid="stProgress"]>div>div{
-    background:linear-gradient(90deg,#4f1d96,#7c3aed,#a78bfa) !important;
-    border-radius:10px;box-shadow:0 0 12px rgba(139,92,246,0.7);
-}
-div[data-testid="stExpander"]{background:rgba(10,10,30,0.8);border:1px solid rgba(120,80,255,0.2);border-radius:10px;}
-/* FIX 4: built-bar was #475569 — too dark */
-.built-bar{
-    background:rgba(5,8,25,0.9);border:1px solid rgba(120,80,255,0.2);
-    border-radius:10px;padding:0.8rem 1.5rem;text-align:center;
-    font-size:0.82rem;color:#94a3b8;margin-top:1.5rem;
-}
-/* FIX 5: footer color already good, keeping #94a3b8 */
-.footer{text-align:center;color:#94a3b8;font-size:0.8rem;margin-top:3rem;padding:1.5rem;border-top:1px solid rgba(120,80,255,0.1);}
-</style>
-""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
-# SIDEBAR
+# State
 # ══════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown("""
-    <div style="text-align:center;padding:0.8rem 0 0.3rem;">
-        <div style="font-size:2rem;filter:drop-shadow(0 0 12px rgba(167,139,250,0.9));">🗺️</div>
-        <div style="color:#a78bfa;font-weight:700;font-size:1.1rem;font-family:'Orbitron',sans-serif;letter-spacing:1px;">PLAN YOUR TRIP</div>
-        <!-- FIX 6: was #64748b — too dark -->
-        <div style="color:#94a3b8;font-size:0.78rem;margin-top:0.2rem;">Fill in your travel details</div>
-    </div>""", unsafe_allow_html=True)
+for key, default in [("plan", None), ("result", None), ("elapsed", 0.0), ("request", None)]:
+    st.session_state.setdefault(key, default)
 
-    origin      = st.text_input("✈️ Origin City",      value="",  placeholder="e.g. Mumbai")
-    destination = st.text_input("🏙️ Destination City", value="",     placeholder="e.g. Tokyo")
-    col1,col2   = st.columns(2)
-    with col1: departure = st.date_input("📅 Departure", value=date.today()+timedelta(days=30))
-    with col2: return_dt = st.date_input("📅 Return",    value=date.today()+timedelta(days=37))
-    travellers    = st.number_input("👥 Travellers",   min_value=1,   max_value=20,     value=1)
-    budget        = st.number_input("💰 Budget (USD)", min_value=100, max_value=100000, value=100, step=100)
-    purpose       = st.selectbox("🎯 Purpose",       ["Select Purpose","leisure","business","adventure","family","honeymoon"])
-    dietary       = st.selectbox("🥗 Dietary",       ["Select Dietary Preference","no preference","vegetarian","vegan","halal","kosher"])
-    accommodation = st.selectbox("🏨 Accommodation", ["Select Accommodation","mid-range","budget","luxury"])
-    special       = st.text_area("📝 Special Requests", height=68, placeholder="Any special needs...")
-    st.divider()
 
-    st.markdown('<div style="color:#a78bfa;font-weight:700;font-size:0.9rem;margin-bottom:0.4rem;letter-spacing:1px;">📡 LANGFUSE TRACING</div>', unsafe_allow_html=True)
-    if LANGFUSE_ENABLED:
-        st.markdown('<div class="lf-active">✅ Langfuse Connected<br/><span style="color:#86efac;font-weight:400;font-size:0.8rem;">Tracing all 9 agent calls</span></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="lf-inactive">❌ Langfuse Not Connected<br/><span style="color:#fca5a5;font-weight:400;font-size:0.8rem;">Add keys to .env to enable</span></div>', unsafe_allow_html=True)
-        with st.expander("🔧 How to connect?"):
-            st.code(
-                "# Add to your .env file\n"
-                "LANGFUSE_PUBLIC_KEY=pk-lf-xxxxxxxx\n"
-                "LANGFUSE_SECRET_KEY=sk-lf-xxxxxxxx\n"
-                "LANGFUSE_BASE_URL=https://us.cloud.langfuse.com",
-                language="bash"
-            )
-            st.caption("Free keys → cloud.langfuse.com · Restart: streamlit run app.py")
+def reset() -> None:
+    for k in ("plan", "result", "elapsed", "request"):
+        st.session_state[k] = None
 
-    st.divider()
-    run_btn = st.button("🚀 GENERATE TRAVEL PLAN", type="primary", use_container_width=True)
 
-    st.markdown('<div style="color:#a78bfa;font-weight:700;font-size:0.9rem;margin:0.8rem 0 0.4rem;letter-spacing:1px;">⚡ TECH STACK</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div class="tech-grid">
-      <div class="tech-item"><span class="t-icon">🦙</span><span class="t-name">Llama 3.3 70B</span></div>
-      <div class="tech-item"><span class="t-icon">🔗</span><span class="t-name">LangGraph</span></div>
-      <div class="tech-item"><span class="t-icon">⛓️</span><span class="t-name">LangChain</span></div>
-      <div class="tech-item"><span class="t-icon">📖</span><span class="t-name">RAG Hybrid</span></div>
-      <div class="tech-item"><span class="t-icon">🛡️</span><span class="t-name">Guardrails</span></div>
-      <div class="tech-item"><span class="t-icon">🔌</span><span class="t-name">MCP Tools</span></div>
-      <div class="tech-item"><span class="t-icon">📊</span><span class="t-name">Pydantic</span></div>
-      <div class="tech-item"><span class="t-icon">📡</span><span class="t-name">Langfuse</span></div>
-      <div class="tech-item"><span class="t-icon">🌐</span><span class="t-name">Streamlit</span></div>
-      <div class="tech-item"><span class="t-icon">🐳</span><span class="t-name">Docker</span></div>
-      <div class="tech-item"><span class="t-icon">🐍</span><span class="t-name">Python</span></div>
-      <div class="tech-item"><span class="t-icon">⚡</span><span class="t-name">Groq</span></div>
-    </div>""", unsafe_allow_html=True)
+def esc(text) -> str:
+    """Minimal escaping — plan text is model-authored and goes into markup."""
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
-     # FIX 7: sidebar info box was color:#475569 — too dark -->
-    st.markdown("""
-    <div style="margin-top:0.8rem;padding:0.8rem;background:rgba(10,5,30,0.7);border-radius:8px;border:1px solid rgba(100,80,200,0.2);font-size:0.78rem;color:#94a3b8;line-height:2;">
-    ⚡ 9 AI Agents collaborate<br/>🧠 Llama 3.3 70B on Groq<br/>
-    📖 Hybrid RAG Knowledge<br/>🛡️ Guardrails Protection<br/>
-    📡 Langfuse Observability<br/>🐳 Docker Deployed
-    </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
-# WELCOME SCREEN
+# Landing — hero + search
 # ══════════════════════════════════════════════════════════════
-if not run_btn:
-    st.markdown("""
-    <div class="hero-banner">
-        <div class="hero-bg"></div>
-        <div class="hero-grid"></div>
-        <div class="hero-content">
-            <div class="hero-title-ai">AI</div>
-            <span class="hero-title-main">MULTI-AGENT</span>
-            <span class="hero-title-sub">TRAVEL PLANNER</span>
-            <div class="hero-subtitle">🤖 9 Autonomous AI Agents · Generate. Plan. Explore.</div>
-            <div class="hero-tagline">"Empowering travellers with AI. Planning the future, one trip at a time."</div>
-            <div class="hero-badge-row">
-                <span class="hero-badge">🦙 Llama 3.3 70B</span>
-                <span class="hero-badge">🔗 LangGraph</span>
-                <span class="hero-badge">⛓️ LangChain</span>
-                <span class="hero-badge">📖 Hybrid RAG</span>
-                <span class="hero-badge">🛡️ Guardrails</span>
-                <span class="hero-badge">🔌 MCP Tools</span>
-            </div>
-            <div class="hero-badge-row">
-                <span class="hero-badge">📊 Pydantic</span>
-                <span class="hero-badge">📡 Langfuse</span>
-                <span class="hero-badge">🌐 Streamlit</span>
-                <span class="hero-badge">🐳 Docker</span>
-            </div>
+def render_search() -> None:
+    st.markdown(
+        """
+        <div style="margin-bottom:2.2rem;">
+          <div class="brand"><span class="brand-mark">✦</span><span class="brand-name">Voyager</span><span class="brand-sub">AI Travel Planner</span></div>
+          <h1>Tell us where you're going.<br/><span class="h1-accent">We'll plan the rest.</span></h1>
+          <p class="lede">A complete day-by-day itinerary with places to stay, what to eat
+          and a realistic budget — built around your dates, your money and how you like
+          to travel.</p>
+          <div class="hero-facts">
+            <span><b>52</b> destinations researched</span>
+            <span><b>Day-by-day</b> itineraries</span>
+            <span><b>Real</b> budget breakdowns</span>
+          </div>
         </div>
-    </div>""", unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="stat-bar">
-        <div class="stat-item"><span class="stat-value" style="color:#60a5fa;">9</span><span class="stat-label">🤖 AI AGENTS</span></div>
-        <div class="stat-item"><span class="stat-value" style="color:#a78bfa;">5</span><span class="stat-label">🔌 MCP TOOLS</span></div>
-        <div class="stat-item"><span class="stat-value" style="color:#f59e0b;">70B</span><span class="stat-label">⚡ LLAMA MODEL</span></div>
-        <div class="stat-item"><span class="stat-value" style="color:#34d399;">24/7</span><span class="stat-label">🕐 AUTONOMOUS</span></div>
-        <div class="stat-item"><span class="stat-value" style="color:#f87171;">100%</span><span class="stat-label">⚡ AI POWERED</span></div>
-    </div>""", unsafe_allow_html=True)
-
-    st.markdown('<div class="built-bar">✨ BUILT WITH: Python · LangChain · LangGraph · ChromaDB · BM25 · Groq · Pydantic · Langfuse · Streamlit · Docker</div>', unsafe_allow_html=True)
-    st.stop()
-
-# ══════════════════════════════════════════════════════════════
-# BUILD REQUEST
-# ══════════════════════════════════════════════════════════════
-try:
-    request = TravelRequest(
-        origin=origin, destination=destination,
-        departure_date=departure.strftime("%Y-%m-%d"),
-        return_date=return_dt.strftime("%Y-%m-%d"),
-        travellers=int(travellers), budget_usd=float(budget),
-        travel_purpose=purpose, dietary_preference=dietary,
-        accommodation_preference=accommodation, special_requests=special or None,
+        """,
+        unsafe_allow_html=True,
     )
-except Exception as e:
-    st.error(f"❌ Invalid input: {e}")
-    st.stop()
 
-# ══════════════════════════════════════════════════════════════
-# PROGRESS BAR
-# ══════════════════════════════════════════════════════════════
-st.markdown("""
-<div style="text-align:center;padding:1.2rem;background:linear-gradient(135deg,rgba(79,29,150,0.3),rgba(10,10,30,0.9));border-radius:12px;border:1px solid rgba(120,80,255,0.35);margin-bottom:1rem;">
-    <div style="font-size:2rem;">🤖</div>
-    <div style="color:#a78bfa;font-weight:700;font-size:1.1rem;font-family:'Orbitron',sans-serif;letter-spacing:1px;">9 AI AGENTS WORKING...</div>
-    <!-- FIX 8: was #475569 — too dark -->
-    <div style="color:#94a3b8;font-size:0.8rem;margin-top:0.2rem;">Generating your complete travel plan</div>
-</div>""", unsafe_allow_html=True)
+    with st.form("trip", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        origin = c1.text_input("Flying from", placeholder="Mumbai")
+        destination = c2.text_input("Going to", placeholder="Dubai")
 
-progress_bar = st.progress(0)
-status_text  = st.empty()
-steps = [
-    (10,"🛡️ GuardrailAgent",   "Validating your travel request..."),
-    (20,"📚 RetrievalAgent",   "Fetching destination knowledge from Hybrid RAG..."),
-    (30,"🔧 ToolAgent",        "Calling Weather, Hotel, Flight APIs..."),
-    (45,"🌤️ WeatherAgent",     "Analysing climate data..."),
-    (55,"🗺️ RouteAgent",       "Planning optimal route and itinerary..."),
-    (65,"🏨 HotelAgent",       "Finding best hotels across all tiers..."),
-    (75,"💰 BudgetAgent",      "Calculating complete cost breakdown..."),
-    (85,"🍜 FoodAgent",        "Selecting restaurants and cuisine..."),
-    (95,"📋 FinalPlannerAgent","Compiling your complete travel plan..."),
-]
-import threading
-running = [True]
-def animate():
-    for pct,agent,msg in steps:
-        if not running[0]: break
-        progress_bar.progress(pct)
-        status_text.markdown(f'<div style="background:rgba(79,29,150,0.25);border-radius:8px;padding:0.6rem 1rem;border-left:3px solid #7c3aed;"><span style="color:#a78bfa;font-weight:700;">{agent}</span><span style="color:#94a3b8;"> — {msg}</span></div>', unsafe_allow_html=True)
-        time.sleep(2.8)
-t = threading.Thread(target=animate, daemon=True)
-t.start()
+        c1, c2, c3 = st.columns([1, 1, 0.8])
+        departure = c1.date_input("Departure", value=date.today() + timedelta(days=30))
+        return_dt = c2.date_input("Return", value=date.today() + timedelta(days=35))
+        travellers = c3.number_input("Travellers", min_value=1, max_value=20, value=2)
 
-# ══════════════════════════════════════════════════════════════
-# RUN PIPELINE
-# ══════════════════════════════════════════════════════════════
-trace_ctx  = {}
-start_time = time.time()
+        c1, c2 = st.columns([1, 1])
+        budget = c1.number_input(
+            "Total budget (USD)", min_value=100, max_value=100_000, value=2500, step=100
+        )
+        # Real values only — the old placeholder options ("Select Purpose")
+        # were passed straight into the request when left untouched.
+        purpose = c2.selectbox(
+            "Trip type", ["Leisure", "Adventure", "Family", "Business", "Honeymoon"]
+        )
 
-with tracer.trace(
-    name=f"travel_plan_{destination}",
-    input_data={
-        "origin": origin, "destination": destination,
-        "departure": departure.strftime("%Y-%m-%d"),
-        "return": return_dt.strftime("%Y-%m-%d"),
-        "travellers": int(travellers), "budget_usd": float(budget),
-        "purpose": purpose, "dietary": dietary,
-    },
-    metadata={"model": "llama-3.3-70b-versatile", "agents": 9},
-    tags=["travel-planner","multi-agent","production"],
-) as trace_ctx:
-    tracer.log_guardrail_span("input_validation", passed=True, reason="Request validated")
-    with st.spinner(""):
-        result = run_travel_pipeline(request)
-    tracer.set_output({
-        "status": "completed",
-        "has_plan": result.get("final_plan") is not None,
-        "errors": result.get("errors", []),
-    })
+        c1, c2 = st.columns(2)
+        dietary = c1.selectbox(
+            "Dietary preference",
+            ["No preference", "Vegetarian", "Vegan", "Halal", "Kosher"],
+        )
+        stay = c2.selectbox("Style of stay", ["Mid-range", "Budget", "Luxury"])
 
-running[0] = False
-elapsed = time.time() - start_time
-progress_bar.progress(100)
-status_text.markdown(f'<div style="background:rgba(74,222,128,0.1);border-radius:8px;padding:0.6rem 1rem;border-left:3px solid #4ade80;text-align:center;"><span style="color:#4ade80;font-weight:700;">✅ Travel Plan Generated in {elapsed:.1f} seconds!</span></div>', unsafe_allow_html=True)
+        notes = st.text_area(
+            "Anything else we should know?",
+            placeholder="Travelling with a toddler · want to avoid long drives · celebrating an anniversary",
+            height=80,
+        )
 
-plan     = result.get("final_plan")
-errors   = result.get("errors", [])
-warnings = result.get("warnings", [])
-if errors:
-    for e in errors: st.error(f"❌ {e}")
-if warnings:
-    with st.expander(f"⚠️ {len(warnings)} Warning(s)"):
-        for w in warnings: st.warning(w)
-if not plan:
-    st.error("❌ Failed to generate plan. Check GROQ_API_KEY in .env")
-    flush_langfuse()
-    st.stop()
+        st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+        c1, c2 = st.columns([1, 2])
+        submitted = c1.form_submit_button("Plan my trip", use_container_width=True)
+        fresh = c2.checkbox(
+            "Re-plan from scratch",
+            value=False,
+            help="Ignore a previously saved plan for this exact trip.",
+        )
 
-trace_id = trace_ctx.get("trace_id")
-tracer.score_plan(
-    trace_id=trace_id,
-    overall_confidence=plan.overall_confidence,
-    agent_scores={
-        "RouteAgent":   getattr(plan.route,   "confidence", 0) if plan.route   else 0,
-        "WeatherAgent": getattr(plan.weather, "confidence", 0) if plan.weather else 0,
-        "HotelAgent":   getattr(plan.hotels,  "confidence", 0) if plan.hotels  else 0,
-        "BudgetAgent":  getattr(plan.budget,  "confidence", 0) if plan.budget  else 0,
-        "FoodAgent":    getattr(plan.food,    "confidence", 0) if plan.food    else 0,
-    }
-)
-flush_langfuse()
-
-# ══════════════════════════════════════════════════════════════
-# SUMMARY CARD
-# ══════════════════════════════════════════════════════════════
-st.markdown(f"""
-<div style="background:linear-gradient(135deg,#080420,#100840,#080420);border-radius:16px;padding:1.8rem;margin:1.5rem 0;border:1px solid rgba(120,80,255,0.5);box-shadow:0 0 40px rgba(120,80,255,0.2);">
-    <div style="color:#a78bfa;font-weight:700;font-size:1.1rem;font-family:'Orbitron',sans-serif;">📋 PLAN ID: {plan.plan_id}</div>
-    <!-- FIX 9: was #475569 — too dark -->
-    <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:0.5rem;">{origin} → {destination} | {departure} to {return_dt}</div>
-    <div style="color:#e2e8f0;font-style:italic;font-size:0.95rem;padding:0.8rem;background:rgba(120,80,255,0.05);border-radius:8px;border-left:3px solid #7c3aed;">{plan.executive_summary}</div>
-</div>""", unsafe_allow_html=True)
-
-c1,c2,c3,c4,c5 = st.columns(5)
-c1.metric("🎯 Confidence", f"{plan.overall_confidence:.0%}")
-c2.metric("📅 Duration",   f"{(return_dt-departure).days} days")
-c3.metric("👥 Travellers", f"{travellers}")
-c4.metric("💰 Budget",     f"${budget:,}")
-c5.metric("⏱️ Generated",  f"{elapsed:.1f}s")
-
-if LANGFUSE_ENABLED and trace_id:
-    base = os.environ.get("LANGFUSE_BASE_URL", os.environ.get("LANGFUSE_HOST","https://cloud.langfuse.com"))
-    st.markdown(f'<div class="trace-card">📡 <strong>Langfuse Trace Active</strong> — All 9 agents traced<br/>🔗 Dashboard: <strong>{base}</strong><br/>🆔 Trace ID: <code>{trace_id}</code></div>', unsafe_allow_html=True)
-
-st.divider()
-
-# ══════════════════════════════════════════════════════════════
-# RESULT TABS
-# ══════════════════════════════════════════════════════════════
-tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs([
-    "🗺️  Route","🌤️  Weather","🏨  Hotels","💰  Budget","🍜  Food","📊  RAG Eval"
-])
-
-def sh(t): st.markdown(f'<div class="sh">{t}</div>', unsafe_allow_html=True)
-def pill(txt,bg,bd,cl): return f'<div style="background:{bg};border-radius:6px;padding:0.4rem 0.8rem;margin:0.2rem 0;border-left:3px solid {bd};color:{cl};">{txt}</div>'
-
-with tab1:
-    sh("🗺️ Route Plan")
-    r = plan.route
-    if r:
-        st.markdown(f'<div class="result-card"><div style="color:#c4b5fd;font-weight:700;">🧭 {r.best_route_summary}</div></div>', unsafe_allow_html=True)
-        c1,c2,c3=st.columns(3)
-        c1.metric("📏 Distance",  f"{r.distance_km:,.0f} km")
-        c2.metric("📅 Days",      f"{r.total_days}")
-        c3.metric("🎯 Confidence",f"{r.confidence:.0%}")
-        sh("🚌 Transport Options")
-        tc=st.columns(min(len(r.transportation_options),3))
-        for i,opt in enumerate(r.transportation_options):
-            tc[i%3].markdown(f'<div style="background:rgba(120,80,255,0.12);border-radius:8px;padding:0.5rem;text-align:center;border:1px solid rgba(120,80,255,0.3);color:#c4b5fd;font-weight:600;">🚌 {opt}</div>', unsafe_allow_html=True)
-        sh("📅 Day-by-Day Itinerary")
-        for day in r.day_wise_itinerary:
-            with st.expander(f"📅 Day {day.day} — {day.date} | 💵 ${day.estimated_cost_usd:.0f}"):
-                st.markdown(f"**🚗 Transport:** {day.transportation}  |  **🏨 Stay:** {day.accommodation}")
-                for act in day.activities: st.markdown(f"• {act}")
-    else:
-        st.warning("⚠️ Route data not generated. Please try again.")
-
-with tab2:
-    sh("🌤️ Weather Information")
-    w = plan.weather
-    if w:
-        c1,c2,c3,c4=st.columns(4)
-        c1.metric("🌡️ Temp",     f"{w.current_temp_celsius}°C")
-        c2.metric("💧 Humidity", f"{w.humidity_percent}%")
-        c3.metric("💨 Wind",     f"{w.wind_speed_kmh:.0f} km/h")
-        c4.metric("☁️ Condition",w.condition)
-        if w.travel_warnings:
-            sh("🚨 Travel Warnings")
-            for warn in w.travel_warnings: st.error(f"⚠️ {warn}")
-        sh("👗 What to Pack")
-        pc=st.columns(2)
-        for i,item in enumerate(w.clothing_suggestions):
-            pc[i%2].markdown(pill(f"👗 {item}","rgba(59,130,246,0.08)","#3b82f6","#93c5fd"), unsafe_allow_html=True)
-        if w.forecast_7days:
-            sh("📅 7-Day Forecast")
-            fc=st.columns(min(len(w.forecast_7days),7))
-            for i,day in enumerate(w.forecast_7days[:7]):
-                with fc[i]:
-                    hi=day.get('temp_high',day.get('high','?'))
-                    lo=day.get('temp_low', day.get('low','?'))
-                    cn=day.get('condition',day.get('description',''))
-                    # FIX 10: forecast day text was #64748b — too dark
-                    st.markdown(f'<div style="background:rgba(79,29,150,0.25);border-radius:8px;padding:0.5rem;text-align:center;border:1px solid rgba(120,80,255,0.2);"><div style="color:#a78bfa;font-size:0.68rem;font-weight:700;">{str(day.get("date",""))[:10]}</div><div style="color:#c4b5fd;font-size:0.9rem;font-weight:700;">↑{hi}° ↓{lo}°</div><div style="color:#94a3b8;font-size:0.68rem;">{cn}</div></div>', unsafe_allow_html=True)
-        if hasattr(w,'best_travel_months') and w.best_travel_months:
-            sh("🌸 Best Months")
-            st.success("  |  ".join(w.best_travel_months))
-    else:
-        st.warning("⚠️ Weather data not generated. Please try again.")
-
-with tab3:
-    sh("🏨 Hotel Recommendations")
-    h = plan.hotels
-    if h:
-        st.info(f"📍 **Best Area:** {h.recommended_area}")
-        for tier,hlist,cls in [
-            ("💚 Budget Hotels", h.budget_hotels,"hotel-budget"),
-            ("💛 Premium Hotels",h.premium_hotels,"hotel-premium"),
-            ("💙 Family Hotels", h.family_hotels,"hotel-family"),
-        ]:
-            sh(tier)
-            if not hlist: st.caption("No options returned."); continue
-            hc=st.columns(min(len(hlist),2))
-            for i,hotel in enumerate(hlist):
-                with hc[i%2]:
-                    # FIX 11: hotel location was #64748b and amenities #475569 — too dark
-                    st.markdown(f'<div class="result-card {cls}"><div style="color:#c4b5fd;font-weight:700;">🏨 {hotel.name}</div><div style="color:#facc15;">{"⭐"*min(int(hotel.rating),5)} {hotel.rating}/5</div><div style="color:#4ade80;font-size:1.2rem;font-weight:700;">${hotel.price_per_night_usd:.0f}/night</div><div style="color:#94a3b8;font-size:0.85rem;margin-top:0.3rem;">📍 {hotel.location_description}</div><div style="color:#94a3b8;font-size:0.8rem;">🏷️ {", ".join(hotel.amenities)}</div><div style="background:rgba(120,80,255,0.1);border-radius:6px;padding:0.3rem 0.6rem;margin-top:0.4rem;font-size:0.8rem;color:#c4b5fd;border:1px solid rgba(120,80,255,0.2);">💡 {hotel.booking_tip}</div></div>', unsafe_allow_html=True)
-    else:
-        st.warning("⚠️ Hotel data not generated. Please try again.")
-
-with tab4:
-    sh("💰 Budget Breakdown")
-    bd_obj = plan.budget
-    if bd_obj:
-        bd=bd_obj.per_person_breakdown
-        c1,c2,c3=st.columns(3)
-        c1.metric("💰 Total",     f"${bd_obj.total_trip_cost_usd:,.0f}")
-        c2.metric("👤 Per Person",f"${bd.total_usd:,.0f}")
-        c3.metric("🏷️ Tier",      bd_obj.budget_tier.title())
-        st.markdown(f'<div style="background:rgba(79,29,150,0.2);border-radius:8px;padding:0.6rem 1rem;margin:0.5rem 0;border-left:3px solid #7c3aed;color:#c4b5fd;">💱 <strong>Currency:</strong> {bd_obj.currency_info}</div>', unsafe_allow_html=True)
-        sh("📊 Cost Per Person")
-        items=[
-            ("✈️","Flights",      bd.flights_usd,        "#60a5fa"),
-            ("🏨","Accommodation",bd.accommodation_usd,  "#34d399"),
-            ("🍽️","Food",         bd.food_usd,           "#f59e0b"),
-            ("🚌","Transport",    bd.local_transport_usd,"#a78bfa"),
-            ("🎭","Activities",   bd.activities_usd,     "#f87171"),
-            ("📦","Misc",         bd.miscellaneous_usd,  "#94a3b8"),
-        ]
-        bc=st.columns(3)
-        for i,(emoji,label,amount,color) in enumerate(items):
-            # FIX 12: label was #64748b — too dark
-            bc[i%3].markdown(f'<div style="background:rgba(10,5,30,0.9);border-radius:10px;padding:0.8rem;text-align:center;border:1px solid rgba(120,80,255,0.2);margin:0.3rem 0;"><div style="font-size:1.4rem">{emoji}</div><div style="color:#94a3b8;font-size:0.78rem;font-weight:600;">{label}</div><div style="color:{color};font-size:1.2rem;font-weight:700;">${amount:,.0f}</div></div>', unsafe_allow_html=True)
-        import pandas as pd
-        df=pd.DataFrame({"Category":[i[1] for i in items],"USD":[i[2] for i in items]})
-        st.bar_chart(df.set_index("Category"))
-        sh("💡 Saving Tips")
-        for tip in bd_obj.saving_tips:
-            st.markdown(pill(f"💡 {tip}","rgba(74,222,128,0.07)","#4ade80","#86efac"), unsafe_allow_html=True)
-    else:
-        st.warning("⚠️ Budget data not generated. Please try again.")
-
-with tab5:
-    sh("🍜 Food Recommendations")
-    food = plan.food
-    if food:
-        st.metric("🍽️ Avg Meal Cost",f"${food.average_meal_cost_usd:.0f}/person")
-        c1,c2=st.columns(2)
-        with c1:
-            sh("🥗 Vegetarian")
-            for d in food.vegetarian_dishes:
-                st.markdown(pill(f"🥗 {d}","rgba(74,222,128,0.07)","#4ade80","#86efac"), unsafe_allow_html=True)
-            sh("🌮 Street Food")
-            for d in food.street_food_recommendations:
-                st.markdown(pill(f"🌮 {d}","rgba(251,191,36,0.07)","#fbbf24","#fde68a"), unsafe_allow_html=True)
-        with c2:
-            sh("🍖 Non-Vegetarian")
-            for d in food.non_vegetarian_dishes:
-                st.markdown(pill(f"🍖 {d}","rgba(239,68,68,0.07)","#ef4444","#fca5a5"), unsafe_allow_html=True)
-            sh("⭐ Local Specialties")
-            for d in food.local_specialties:
-                st.markdown(pill(f"⭐ {d}","rgba(139,92,246,0.07)","#8b5cf6","#c4b5fd"), unsafe_allow_html=True)
-        sh("🍴 Restaurants")
-        for rest in food.restaurant_suggestions:
-            with st.expander(f"🍴 {rest.name}  {rest.price_range}  ⭐ {rest.rating}"):
-                rc1,rc2=st.columns(2)
-                rc1.markdown(f"**🍽️ Cuisine:** {rest.cuisine_type}\n\n**⭐ Must-try:** {rest.must_try_dish}")
-                rc2.markdown(f"**🥗 Dietary:** {', '.join(rest.dietary_options)}\n\n**📍 Location:** {rest.location_hint}")
-        if food.food_safety_tips:
-            sh("🛡️ Food Safety")
-            for tip in food.food_safety_tips: st.warning(f"⚠️ {tip}")
-    else:
-        st.warning("⚠️ Food data not generated. Please try again.")
-
-with tab6:
-    sh("📊 RAG Evaluation — RAGAS Framework")
-    st.markdown("<p style='color:#94a3b8;'>Evaluating Hybrid RAG quality using RAGAS framework</p>", unsafe_allow_html=True)
-    c1,c2=st.columns(2)
-    with c1:
-        st.markdown('<div class="result-card"><strong style="color:#c4b5fd">📋 Metrics</strong><br/><br/><div style="color:#e2e8f0;line-height:2.2;">🎯 <strong>Faithfulness</strong> — Answer grounded in context?<br/>💡 <strong>Answer Relevancy</strong> — Relevant to question?<br/>🔍 <strong>Context Precision</strong> — Context accurate?<br/>📚 <strong>Context Recall</strong> — All info retrieved?</div></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="result-card"><strong style="color:#c4b5fd">⚙️ RAG Config</strong><br/><br/><div style="color:#e2e8f0;line-height:2.2;">📖 Type: Hybrid (Dense 60% + BM25 40%)<br/>📏 Chunk: 512 chars | Overlap: 64<br/>🧠 Embed: all-MiniLM-L6-v2 (384d)<br/>🔀 Fusion: RRF | Top-K: 5</div></div>', unsafe_allow_html=True)
-    st.divider()
-    try:
-        from ragas import evaluate
-        from ragas.metrics import faithfulness,answer_relevancy,context_precision,context_recall
-        from datasets import Dataset
-        RAGAS_OK=True
-    except ImportError:
-        RAGAS_OK=False
-        st.error("❌ Run: pip install ragas datasets")
-
-    if RAGAS_OK:
-        if st.button("🔬 Run RAG Evaluation", type="primary", use_container_width=True):
-            EVAL={
-                "question":["Best time to visit Paris?","Budget hotels in Paris?","Food to try in Tokyo?","Save money travelling?","What to pack for travel?"],
-                "answer":["April-June and September-October.","10th-11th arrondissements ~$70/night.","Ramen, sushi, tempura, yakitori.","Book 6-8 weeks ahead, use hostels.","Lightweight clothes, adapter, charger."],
-                "contexts":[
-                    ["Paris best months: April-June and September-October."],
-                    ["Budget hotels 10th-11th arrondissements ~$70/night."],
-                    ["Tokyo: ramen, sushi, tempura, yakitori, okonomiyaki."],
-                    ["Book 6-8 weeks ahead. Hostels save 60-70%."],
-                    ["Pack: lightweight clothing, adapter, charger, maps."],
-                ],
-                "ground_truth":[
-                    "April-June spring and September-October fall.",
-                    "$70/night 10th and 11th arrondissements.",
-                    "Ramen, sushi, tempura, yakitori, okonomiyaki.",
-                    "Book early, hostels save money.",
-                    "Lightweight clothes, adapter, charger, maps.",
-                ],
-            }
-            with st.spinner("🔬 Running RAGAS... (2-3 min)"):
-                try:
-                    from langchain_groq import ChatGroq
-                    from langchain_community.embeddings import HuggingFaceEmbeddings
-                    rl=ChatGroq(api_key=os.getenv("GROQ_API_KEY",""),model="llama-3.3-70b-versatile",temperature=0)
-                    re=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-                    ds=Dataset.from_dict(EVAL)
-                    res=evaluate(dataset=ds,metrics=[faithfulness,answer_relevancy,context_precision,context_recall],llm=rl,embeddings=re,raise_exceptions=False)
-                    df2=res.to_pandas()
-                    scores={"faithfulness":float(df2["faithfulness"].mean()),"answer_relevancy":float(df2["answer_relevancy"].mean()),"context_precision":float(df2["context_precision"].mean()),"context_recall":float(df2["context_recall"].mean())}
-                    src="live"
-                except Exception as ex:
-                    st.warning(f"Live eval failed ({ex}) — demo scores shown.")
-                    scores={"faithfulness":0.87,"answer_relevancy":0.82,"context_precision":0.79,"context_recall":0.84}
-                    src="demo"
-            scores["overall"]=round(sum(scores.values())/4,4)
-            ov=scores["overall"]
-            if ov>=0.8:   st.success(f"🎉 Overall: {ov:.1%} — EXCELLENT")
-            elif ov>=0.6: st.info(   f"✅ Overall: {ov:.1%} — GOOD")
-            else:         st.warning(f"⚠️ Overall: {ov:.1%} — NEEDS IMPROVEMENT")
-            mc1,mc2=st.columns(2)
-            for i,(label,score,desc) in enumerate([
-                ("🎯 Faithfulness",     scores["faithfulness"],     "Grounded in context"),
-                ("💡 Answer Relevancy", scores["answer_relevancy"], "Relevant to question"),
-                ("🔍 Context Precision",scores["context_precision"],"Context accurate"),
-                ("📚 Context Recall",   scores["context_recall"],   "All info retrieved"),
-            ]):
-                col=mc1 if i%2==0 else mc2
-                with col:
-                    st.metric(label,f"{score:.1%}")
-                    st.caption(f"{'🟢' if score>=0.8 else '🟡' if score>=0.6 else '🔴'} {desc}")
-                    st.progress(score)
-
-            import pandas as pd
-            st.bar_chart(pd.DataFrame({"Metric":list(scores.keys()),"Score":list(scores.values())}).set_index("Metric"))
-
-            if LANGFUSE_ENABLED:
-                rag_tracer = get_tracer()
-                with rag_tracer.trace(
-                    name="rag_evaluation",
-                    input_data={"num_questions":5,"framework":"RAGAS"},
-                    tags=["rag-eval","ragas"],
-                ) as rag_ctx:
-                    rag_tracer.set_output(scores)
-                    rag_tid = rag_ctx.get("trace_id")
-                rag_tracer.score_rag(rag_tid, scores)
-                flush_langfuse()
-                st.success("📡 RAG scores logged to Langfuse dashboard!")
-
-            st.download_button(
-                "⬇️ Download Results",
-                data=json.dumps({"scores":scores,"source":src},indent=2),
-                file_name="rag_eval.json", mime="application/json",
+    if submitted:
+        if not origin.strip() or not destination.strip():
+            st.markdown(
+                '<div class="notice notice-warn">Please enter where you\'re '
+                "flying from and where you're going.</div>",
+                unsafe_allow_html=True,
             )
-        else:
-            # FIX 13: was #475569 — too dark
-            st.markdown('<div style="background:rgba(79,29,150,0.15);border-radius:10px;padding:1.5rem;border:1px solid rgba(120,80,255,0.2);text-align:center;margin-top:1rem;"><div style="font-size:2rem;">🔬</div><div style="color:#a78bfa;font-weight:700;margin-top:0.5rem;">Click above to run RAG Evaluation</div><div style="color:#94a3b8;font-size:0.85rem;margin-top:0.3rem;">Evaluates 5 questions · Results logged to Langfuse · Takes 2-3 min</div></div>', unsafe_allow_html=True)
+            return
+        start_planning(
+            origin, destination, departure, return_dt, travellers, budget,
+            purpose, dietary, stay, notes, fresh,
+        )
+
+    history = recent_runs(5)
+    if history:
+        st.markdown("<div style='height:1.4rem'></div>", unsafe_allow_html=True)
+        with st.expander("Recent trips"):
+            for r in history:
+                st.markdown(
+                    f"<div style='padding:0.3rem 0;font-size:0.9rem;'>"
+                    f"<b>{esc(r['origin'])} → {esc(r['destination'])}</b>"
+                    f"<span class='caption'> · {esc(r['departure_date'])}"
+                    f" · {r['travellers']} traveller(s)</span></div>",
+                    unsafe_allow_html=True,
+                )
+
 
 # ══════════════════════════════════════════════════════════════
-# DOWNLOAD + FOOTER
+# Planning
 # ══════════════════════════════════════════════════════════════
-st.divider()
-dc1,dc2=st.columns(2)
-with dc1:
-    st.download_button("⬇️ Download Full Plan (JSON)",data=plan.model_dump_json(indent=2),file_name=f"travel_plan_{plan.plan_id}.json",mime="application/json",use_container_width=True)
-with dc2:
-    if st.button("🔄 Plan Another Trip",use_container_width=True): st.rerun()
+# Written from the traveller's point of view. The old copy narrated the
+# system ("RetrievalAgent — fetching from Hybrid RAG"), which tells someone
+# waiting for an itinerary nothing they can use.
+STEPS = [
+    (8,  "Checking your dates and budget"),
+    (20, "Reading up on {dest}"),
+    (34, "Looking at the weather for your dates"),
+    (50, "Mapping out your days"),
+    (66, "Finding places to stay"),
+    (80, "Working out the costs"),
+    (92, "Picking out where to eat"),
+    (97, "Writing up your itinerary"),
+]
 
-st.markdown("""
-<div class="footer">
-    ✈️ <strong>AI Multi-Agent Travel Planner</strong> |
-    🦙 Llama 3.3 70B · 🔗 LangGraph · 📖 Hybrid RAG · 📡 Langfuse · 🌐 Streamlit · 🐳 Docker<br/>
-    <!-- FIX 14: was #1e1060 — completely invisible -->
-    <span style="color:#a78bfa;">"Empowering travellers with AI. Planning the future, one trip at a time."</span>
-</div>
-""", unsafe_allow_html=True)
+
+def start_planning(origin, destination, departure, return_dt, travellers,
+                   budget, purpose, dietary, stay, notes, fresh) -> None:
+    try:
+        request = TravelRequest(
+            origin=origin.strip(),
+            destination=destination.strip(),
+            departure_date=departure.strftime("%Y-%m-%d"),
+            return_date=return_dt.strftime("%Y-%m-%d"),
+            travellers=int(travellers),
+            budget_usd=float(budget),
+            travel_purpose=purpose.lower(),
+            dietary_preference=dietary.lower(),
+            accommodation_preference=stay.lower(),
+            special_requests=notes.strip() or None,
+        )
+    except Exception as e:
+        st.markdown(
+            f'<div class="notice notice-warn">We couldn\'t read that: {esc(e)}</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        f"""<div style="margin-bottom:1.4rem;">
+              <div class="eyebrow">Planning</div>
+              <h2>{esc(request.origin)} → {esc(request.destination)}</h2>
+              <p class="caption">This usually takes three to five minutes.
+              You can leave this open.</p>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+    bar = st.progress(0)
+    slot = st.empty()
+
+    import threading
+    running = [True]
+
+    def tick():
+        """
+        Indicative only — the pipeline reports no per-stage progress, so this
+        walks the known order on a timer and holds at the last step rather
+        than showing 100% while work continues.
+        """
+        t0, i = time.time(), 0
+        while running[0]:
+            pct, label = STEPS[min(i, len(STEPS) - 1)]
+            slot.markdown(
+                f'<div class="step"><span class="step-dot"></span>'
+                f'<span>{esc(label.format(dest=request.destination))}</span>'
+                f'<span class="step-time">{time.time()-t0:0.0f}s</span></div>',
+                unsafe_allow_html=True,
+            )
+            bar.progress(min(pct, 97))
+            time.sleep(2.2)
+            if i < len(STEPS) - 1:
+                i += 1
+
+    threading.Thread(target=tick, daemon=True).start()
+
+    started = time.time()
+    with tracer.trace(
+        name=f"travel_plan_{request.destination}",
+        input_data={
+            "origin": request.origin, "destination": request.destination,
+            "departure": request.departure_date, "return": request.return_date,
+            "travellers": request.travellers, "budget_usd": request.budget_usd,
+        },
+        metadata={"model": os.getenv("LLM_MODEL", ""), "surface": "web"},
+        tags=["travel-planner", "web"],
+    ) as ctx:
+        result = run_travel_pipeline(
+            request, use_cache=not fresh, trace_id=ctx.get("trace_id", "")
+        )
+        tracer.set_output({"has_plan": result.get("final_plan") is not None})
+
+    running[0] = False
+    elapsed = time.time() - started
+    bar.progress(100)
+    slot.empty()
+
+    plan = result.get("final_plan")
+    if plan is not None:
+        tracer.score_quality(
+            trace_id=ctx.get("trace_id"),
+            data_sources=plan.data_sources,
+            rag_grounding=plan.rag_grounding,
+            warnings=len(plan.warnings or []),
+            latency_s=elapsed,
+        )
+    flush_langfuse()
+
+    st.session_state.update(
+        plan=plan, result=result, elapsed=elapsed, request=request
+    )
+    st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════
+# Results
+# ══════════════════════════════════════════════════════════════
+MISSING_HINT = {
+    "rate_limit": (
+        "The AI service is rate-limiting us right now.",
+        "Wait a moment and try again.",
+    ),
+    "empty_response": (
+        "The model ran out of room before finishing this section.",
+        "Re-planning usually fixes it. If it keeps happening, raise "
+        "LLM_MAX_TOKENS in your .env.",
+    ),
+    "auth": (
+        "We couldn't reach the AI service.",
+        "The API key looks missing or invalid — check GROQ_API_KEY in your .env.",
+    ),
+    "error": (
+        "Something went wrong building this section.",
+        "Re-planning usually fixes it.",
+    ),
+}
+
+
+def llm_failures() -> list:
+    result = st.session_state.result or {}
+    return result.get("llm_errors", []) or []
+
+
+def failure_kinds() -> set:
+    """Which kinds of LLM failure happened during this run."""
+    return {e.get("kind", "error") for e in llm_failures()}
+
+
+def failure_message() -> tuple:
+    """
+    (title, body) describing why sections are missing.
+
+    Rate limits get specific treatment: a daily cap and a per-minute burst
+    are the same HTTP status but completely different advice, and the wait
+    time comes from the provider rather than a guess.
+    """
+    failures = llm_failures()
+    kinds = {f.get("kind", "error") for f in failures}
+
+    if "rate_limit" in kinds:
+        rl = next(f for f in failures if f.get("kind") == "rate_limit")
+        wait = rl.get("retry_after") or "a few minutes"
+        if rl.get("daily"):
+            return (
+                "You've used up today's AI quota.",
+                f"The free Groq tier allows 200,000 tokens per day and a full plan "
+                f"needs around 20,000. It resets in {wait}. You can also raise the "
+                f"limit on your Groq billing page.",
+            )
+        return (
+            "The AI service is rate-limiting us right now.",
+            f"The free tier allows 8,000 tokens per minute and a full plan needs "
+            f"more than that, so calls get queued. Try again in {wait}.",
+        )
+
+    for k in ("auth", "empty_response", "error"):
+        if k in kinds:
+            return MISSING_HINT[k]
+    return MISSING_HINT["error"]
+
+
+def replan() -> None:
+    """Re-run the stored request, skipping the cache so a failed plan is not reused."""
+    req = st.session_state.request
+    if req is None:
+        reset(); st.rerun(); return
+    with st.spinner("Re-planning…"):
+        started = time.time()
+        result = run_travel_pipeline(req, use_cache=False)
+    st.session_state.update(
+        plan=result.get("final_plan"), result=result,
+        elapsed=time.time() - started, request=req,
+    )
+    st.rerun()
+
+
+def render_missing(what: str) -> None:
+    """
+    Explain WHY a section is empty.
+
+    Every one of these is an upstream failure the pipeline swallowed on
+    purpose so a single bad call could not kill the run. Swallowing it in the
+    UI too is what turned a rate limit into an unexplained blank tab.
+    """
+    kinds = failure_kinds()
+    kind = ("rate_limit" if "rate_limit" in kinds
+            else "auth" if "auth" in kinds
+            else "empty_response" if "empty_response" in kinds
+            else "error" if kinds else None)
+
+    if kind is None:
+        st.markdown(
+            f'<div class="empty"><div class="empty-title">No {what} in this plan</div>'
+            f'<div class="empty-body">Try re-planning — this section came back blank.</div>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    title, body = failure_message()
+    st.markdown(
+        f'<div class="empty"><div class="empty-title">{title}</div>'
+        f'<div class="empty-body">{body}</div></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("Try again", key=f"retry_{what}", type="secondary"):
+        replan()
+
+
+SOURCE_LABEL = {
+    "weather": "weather", "maps": "travel times", "hotel": "hotel prices",
+    "restaurant": "restaurants", "flight": "flight prices",
+}
+
+
+def render_trust(plan) -> None:
+    """
+    Say plainly which parts of the plan are real.
+
+    Phrased for a traveller, not an engineer: "sample data" rather than
+    "mock", and framed as what to do about it.
+    """
+    sources = plan.data_sources or {}
+    mocked = plan.mocked_sources
+    if sources and mocked:
+        names = ", ".join(SOURCE_LABEL.get(m, m) for m in mocked)
+        st.markdown(
+            f'<div class="notice notice-warn">'
+            f"<b>Some figures are examples, not live data.</b><br/>"
+            f"The {esc(names)} shown here come from sample data, so treat them as "
+            f"a guide to what to expect rather than prices to book on. Everything "
+            f"else in the plan is real.</div>",
+            unsafe_allow_html=True,
+        )
+
+    grounding = plan.rag_grounding or {}
+    if grounding and not any(grounding.values()):
+        st.markdown(
+            '<div class="notice notice-info">'
+            "<b>This destination isn't in our guidebook yet.</b><br/>"
+            "We've planned it from general knowledge rather than our own research, "
+            "so double-check opening times and prices before you commit.</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_plan() -> None:
+    plan = st.session_state.plan
+    req = st.session_state.request
+    result = st.session_state.result or {}
+    cached = result.get("from_cache")
+
+    if plan is None:
+        st.markdown(
+            '<div class="notice notice-warn"><b>We couldn\'t finish this plan.</b><br/>'
+            "Please try again in a moment.</div>",
+            unsafe_allow_html=True,
+        )
+        for e in result.get("errors", []):
+            st.markdown(f'<div class="caption">{esc(e)}</div>', unsafe_allow_html=True)
+        if st.button("Start over", type="secondary"):
+            reset(); st.rerun()
+        return
+
+    nights = (
+        date.fromisoformat(req.return_date) - date.fromisoformat(req.departure_date)
+    ).days
+
+    # ── Header ────────────────────────────────────────────
+    st.markdown(
+        f"""<div class="trip-head">
+              <div class="eyebrow">Your itinerary</div>
+              <div class="trip-route">{esc(req.origin)} → {esc(req.destination)}</div>
+              <div class="trip-meta">{esc(req.departure_date)} – {esc(req.return_date)}
+                · {nights} nights · {req.travellers} traveller(s)</div>
+              <div class="trip-summary">{esc(plan.executive_summary)}</div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+    total = getattr(plan.budget, "total_trip_cost_usd", None) if plan.budget else None
+    st.markdown(
+        f"""<div class="stats">
+              <div><div class="stat-k">Estimated cost</div>
+                   <div class="stat-v">{'$' + format(total, ',.0f') if total else '—'}</div></div>
+              <div><div class="stat-k">Your budget</div>
+                   <div class="stat-v">${req.budget_usd:,.0f}</div></div>
+              <div><div class="stat-k">Nights</div>
+                   <div class="stat-v">{nights}</div></div>
+              <div><div class="stat-k">Travellers</div>
+                   <div class="stat-v">{req.travellers}</div></div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+    if cached:
+        st.markdown(
+            '<div class="caption" style="margin-bottom:0.8rem;">'
+            "Saved from an earlier plan for these exact details.</div>",
+            unsafe_allow_html=True,
+        )
+
+    kinds = failure_kinds()
+    missing = [n for n, v in [
+        ("itinerary", plan.route), ("stay", plan.hotels),
+        ("food", plan.food), ("weather", plan.weather), ("budget", plan.budget),
+    ] if v is None]
+    if missing:
+        title, body = failure_message()
+        st.markdown(
+            f'<div class="notice notice-warn"><b>This plan is incomplete — '
+            f'{esc(", ".join(missing))} {"are" if len(missing) > 1 else "is"} missing.'
+            f'</b><br/>{title} {body}</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Try again", key="retry_top", type="secondary"):
+            replan()
+
+    render_trust(plan)
+
+    tabs = st.tabs(["Itinerary", "Where to stay", "Food & drink", "Weather", "Budget"])
+
+    with tabs[0]:
+        render_itinerary(plan)
+    with tabs[1]:
+        render_stay(plan)
+    with tabs[2]:
+        render_food(plan)
+    with tabs[3]:
+        render_weather(plan)
+    with tabs[4]:
+        render_budget(plan, req)
+
+    st.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
+    slug = req.destination.lower().replace(" ", "-")
+    c1, c2, c3 = st.columns([1.2, 1, 1])
+
+    # PDF first: it is the artefact a traveller can actually use — print it,
+    # forward it, open it at the gate. JSON stays available for anyone wiring
+    # this into something else.
+    try:
+        c1.download_button(
+            "Download itinerary (PDF)",
+            data=build_itinerary_pdf(plan, req),
+            file_name=f"{slug}-itinerary.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    except Exception as e:
+        c1.markdown(
+            f'<div class="caption">Could not build the PDF ({esc(e)}).</div>',
+            unsafe_allow_html=True,
+        )
+
+    c2.download_button(
+        "Data (JSON)",
+        data=plan.model_dump_json(indent=2),
+        file_name=f"{slug}-itinerary.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    if c3.button("Plan another trip", type="secondary", use_container_width=True):
+        reset(); st.rerun()
+
+    warnings = [w for w in (plan.warnings or []) if not w.startswith("[DataSources]")]
+    if warnings:
+        with st.expander(f"Things worth checking ({len(warnings)})"):
+            for w in warnings:
+                clean = w.split("] ", 1)[-1] if w.startswith("[") else w
+                st.markdown(
+                    f'<div style="padding:0.3rem 0;font-size:0.9rem;color:#9AA5B8;">'
+                    f"· {esc(clean)}</div>",
+                    unsafe_allow_html=True,
+                )
+
+
+def render_itinerary(plan) -> None:
+    route = plan.route
+    if not route:
+        render_missing("itinerary")
+        return
+
+    if route.best_route_summary:
+        st.markdown(
+            f'<div class="card card-tight"><div class="stat-k">Getting there</div>'
+            f'<div style="margin-top:0.4rem;line-height:1.6;">{esc(route.best_route_summary)}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    for day in route.day_wise_itinerary:
+        acts = "".join(f'<div class="act">{esc(a)}</div>' for a in day.activities)
+        st.markdown(
+            f"""<div class="day">
+                  <div class="day-head">
+                    <span class="day-n">Day {day.day}</span>
+                    <span class="day-date">{esc(day.date)}</span>
+                    <span class="day-cost">${day.estimated_cost_usd:,.0f}</span>
+                  </div>
+                  {acts}
+                  <div class="day-foot">
+                    <span>Getting around · {esc(day.transportation)}</span>
+                    <span>Staying · {esc(day.accommodation)}</span>
+                  </div>
+                </div>""",
+            unsafe_allow_html=True,
+        )
+
+
+def render_stay(plan) -> None:
+    hotels = plan.hotels
+    if not hotels:
+        render_missing("accommodation")
+        return
+
+    if hotels.recommended_area:
+        st.markdown(
+            f'<div class="card card-tight"><div class="stat-k">Best area to base yourself</div>'
+            f'<div style="margin-top:0.4rem;line-height:1.6;">{esc(hotels.recommended_area)}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    for label, group in [
+        ("Good value", hotels.budget_hotels),
+        ("A step up", hotels.premium_hotels),
+        ("Good for families", hotels.family_hotels),
+    ]:
+        if not group:
+            continue
+        st.markdown(f'<div class="stat-k" style="margin:1.1rem 0 0.5rem;">{label}</div>',
+                    unsafe_allow_html=True)
+        for h in group:
+            tags = "".join(f'<span class="tag">{esc(a)}</span>' for a in (h.amenities or [])[:5])
+            st.markdown(
+                f"""<div class="listing">
+                      <div class="listing-top">
+                        <span class="listing-name">{esc(h.name)}</span>
+                        <span class="caption">★ {h.rating:g}</span>
+                        <span class="listing-price">${h.price_per_night_usd:,.0f}<span
+                          class="caption"> / night</span></span>
+                      </div>
+                      <div class="listing-sub">{esc(h.location_description)}</div>
+                      <div class="listing-sub" style="color:#6B7789;">{esc(h.booking_tip)}</div>
+                      <div class="listing-tags">{tags}</div>
+                    </div>""",
+                unsafe_allow_html=True,
+            )
+
+
+def render_food(plan) -> None:
+    food = plan.food
+    if not food:
+        render_missing("food")
+        return
+
+    if food.average_meal_cost_usd:
+        st.markdown(
+            f'<div class="card card-tight"><div class="stat-k">Typical meal</div>'
+            f'<div class="stat-v">${food.average_meal_cost_usd:,.0f}'
+            f'<span class="caption" style="font-size:0.85rem;"> per person</span></div></div>',
+            unsafe_allow_html=True,
+        )
+
+    for label, items in [
+        ("Don't leave without trying", food.local_specialties),
+        ("Vegetarian", food.vegetarian_dishes),
+        ("Meat & seafood", food.non_vegetarian_dishes),
+        ("Street food", food.street_food_recommendations),
+    ]:
+        if not items:
+            continue
+        tags = "".join(f'<span class="tag">{esc(i)}</span>' for i in items)
+        st.markdown(
+            f'<div style="margin-bottom:0.9rem;"><div class="stat-k" '
+            f'style="margin-bottom:0.4rem;">{label}</div>{tags}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if food.restaurant_suggestions:
+        st.markdown('<div class="stat-k" style="margin:1.2rem 0 0.5rem;">Where to eat</div>',
+                    unsafe_allow_html=True)
+        for r in food.restaurant_suggestions:
+            st.markdown(
+                f"""<div class="listing">
+                      <div class="listing-top">
+                        <span class="listing-name">{esc(r.name)}</span>
+                        <span class="caption">★ {r.rating:g} · {esc(r.price_range)}</span>
+                      </div>
+                      <div class="listing-sub">{esc(r.cuisine_type)} — try the
+                        {esc(r.must_try_dish)}</div>
+                      <div class="listing-sub" style="color:#6B7789;">{esc(r.location_hint)}</div>
+                    </div>""",
+                unsafe_allow_html=True,
+            )
+
+    if food.food_safety_tips:
+        with st.expander("Eating safely"):
+            for t in food.food_safety_tips:
+                st.markdown(f'<div class="act">{esc(t)}</div>', unsafe_allow_html=True)
+
+
+def render_weather(plan) -> None:
+    w = plan.weather
+    if not w:
+        render_missing("weather")
+        return
+
+    st.markdown(
+        f"""<div class="card">
+              <div class="stats">
+                <div><div class="stat-k">Conditions</div>
+                     <div class="stat-v">{esc(w.condition)}</div></div>
+                <div><div class="stat-k">Temperature</div>
+                     <div class="stat-v">{w.current_temp_celsius:g}°C</div></div>
+                <div><div class="stat-k">Humidity</div>
+                     <div class="stat-v">{w.humidity_percent}%</div></div>
+                <div><div class="stat-k">Wind</div>
+                     <div class="stat-v">{w.wind_speed_kmh:.0f} km/h</div></div>
+              </div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+    if w.travel_warnings:
+        for warn in w.travel_warnings:
+            st.markdown(
+                f'<div class="notice notice-warn">{esc(warn)}</div>',
+                unsafe_allow_html=True,
+            )
+
+    if w.clothing_suggestions:
+        tags = "".join(f'<span class="tag">{esc(c)}</span>' for c in w.clothing_suggestions)
+        st.markdown(
+            f'<div style="margin:1rem 0;"><div class="stat-k" '
+            f'style="margin-bottom:0.4rem;">What to pack</div>{tags}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if w.forecast_7days:
+        st.markdown('<div class="stat-k" style="margin:1.2rem 0 0.5rem;">Day by day</div>',
+                    unsafe_allow_html=True)
+        rows = ""
+        for d in w.forecast_7days[:7]:
+            hi = d.get("temp_high", d.get("high", "—"))
+            lo = d.get("temp_low", d.get("low", "—"))
+            cond = d.get("condition", d.get("description", ""))
+            rows += (
+                f'<div style="display:flex;padding:0.5rem 0;border-bottom:1px solid #232A38;'
+                f'font-size:0.92rem;"><span style="width:9rem;color:#9AA5B8;">'
+                f'{esc(d.get("date","—"))}</span><span style="flex:1;">{esc(cond)}</span>'
+                f'<span style="color:#9AA5B8;">{esc(hi)}° / {esc(lo)}°</span></div>'
+            )
+        st.markdown(f'<div class="card card-tight">{rows}</div>', unsafe_allow_html=True)
+
+
+def render_budget(plan, req) -> None:
+    b = plan.budget
+    if not b:
+        render_missing("budget")
+        return
+
+    bd = b.per_person_breakdown
+    over = b.total_trip_cost_usd > req.budget_usd
+    st.markdown(
+        f"""<div class="card">
+              <div class="stats">
+                <div><div class="stat-k">Total trip</div>
+                     <div class="stat-v" style="color:{'#CC6B6B' if over else '#5FB88A'};">
+                       ${b.total_trip_cost_usd:,.0f}</div></div>
+                <div><div class="stat-k">Per person</div>
+                     <div class="stat-v">${bd.total_usd:,.0f}</div></div>
+                <div><div class="stat-k">Your budget</div>
+                     <div class="stat-v">${req.budget_usd:,.0f}</div></div>
+              </div>
+              <div class="caption" style="margin-top:0.6rem;">
+                {'Over budget by $' + format(b.total_trip_cost_usd - req.budget_usd, ',.0f')
+                 if over else
+                 '$' + format(req.budget_usd - b.total_trip_cost_usd, ',.0f') + ' to spare'}
+                 · {esc(b.currency_info)}</div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+    rows = ""
+    for label, value in [
+        ("Flights", bd.flights_usd), ("Accommodation", bd.accommodation_usd),
+        ("Food", bd.food_usd), ("Local transport", bd.local_transport_usd),
+        ("Activities", bd.activities_usd), ("Other", bd.miscellaneous_usd),
+    ]:
+        pct = (value / bd.total_usd * 100) if bd.total_usd else 0
+        rows += (
+            f'<div style="padding:0.55rem 0;border-bottom:1px solid #232A38;">'
+            f'<div style="display:flex;font-size:0.93rem;">'
+            f'<span style="flex:1;">{label}</span>'
+            f'<span style="color:#9AA5B8;">${value:,.0f}</span></div>'
+            f'<div style="height:3px;background:#232A38;border-radius:2px;margin-top:0.4rem;">'
+            f'<div style="height:3px;width:{pct:.0f}%;background:#E0A458;border-radius:2px;">'
+            f'</div></div></div>'
+        )
+    st.markdown(
+        f'<div class="card card-tight"><div class="stat-k" style="margin-bottom:0.5rem;">'
+        f'Per person</div>{rows}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if b.saving_tips:
+        st.markdown('<div class="stat-k" style="margin:1.2rem 0 0.5rem;">Ways to spend less</div>',
+                    unsafe_allow_html=True)
+        for tip in b.saving_tips:
+            st.markdown(f'<div class="act">{esc(tip)}</div>', unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# Route
+# ══════════════════════════════════════════════════════════════
+if st.session_state.plan is None and st.session_state.result is None:
+    render_search()
+else:
+    render_plan()

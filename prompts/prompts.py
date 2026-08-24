@@ -478,7 +478,22 @@ Step 5: Calculate overall_confidence = mean(agent confidences) × consistency_fa
 Step 6: Write executive summary highlighting the best aspects of the plan.
 
 ## Output Format
-Return ONLY valid JSON matching the TravelPlan schema.
+Return ONLY a valid JSON object with EXACTLY these three top-level keys —
+nothing else, no wrapper object, no "request" key, no sub-plan data:
+
+{{
+  "executive_summary": "<2-3 sentences, specific to this destination and traveller>",
+  "overall_confidence": <float 0.0-1.0>,
+  "consistency_warnings": ["<any date/cost/nights mismatch you found>", ...]
+}}
+
+The route, weather, hotel, budget and food sections are attached automatically
+downstream — do NOT repeat them. If you found no inconsistencies, return an
+empty list for consistency_warnings.
+
+Write the summary for the traveller, not about the system: name the destination,
+the standout experience, and how the plan sits against their budget. Never
+mention agents, JSON, or confidence scores in the summary text.
 """
 
 final_planner_prompt = ChatPromptTemplate.from_messages([
@@ -499,7 +514,28 @@ final_planner_prompt = ChatPromptTemplate.from_messages([
 # ══════════════════════════════════════════════════════════════
 # EXPORTS — everything other modules need
 # ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+# PROMPT VERSION
+# ══════════════════════════════════════════════════════════════
+# Bump this whenever you change anything that alters what the model sees —
+# the templates here, or how the agents fill them in.
+#
+# It is recorded on every stored run, which is what turns "did that prompt
+# edit help?" into a query (`python -m eval.harness --compare`) instead of a
+# guess. Without a version marker, metrics from before and after a change are
+# indistinguishable in the history.
+#
+# v3 — final planner is fed compact digests of the five sub-plans instead of
+#      their full JSON. The dumps came to ~8,000 tokens, over Groq's
+#      per-request ceiling, so the call returned HTTP 413 every single time
+#      and the synthesis always fell back to a canned summary.
+# v2 — final planner returns PlanSynthesis (summary/confidence/consistency)
+#      instead of the whole nested TravelPlan, which never parsed.
+PROMPT_VERSION = "v3"
+
+
 __all__ = [
+    "PROMPT_VERSION",
     "supervisor_prompt",
     "route_prompt",
     "weather_prompt",

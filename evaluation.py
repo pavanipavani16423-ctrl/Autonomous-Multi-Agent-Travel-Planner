@@ -86,7 +86,7 @@ def _build_ragas_llm():
     return LangchainLLMWrapper(
         ChatGroq(
             api_key=os.getenv("GROQ_API_KEY", ""),
-            model=os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"),
+            model=os.getenv("LLM_MODEL", "openai/gpt-oss-120b"),
             temperature=0,
         )
     )

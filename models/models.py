@@ -2,7 +2,7 @@
 # models/models.py — LLM Factory + Pydantic Schema Definitions
 # ============================================================
 # PURPOSE:
-#   • Initialises and exposes the Groq-hosted Llama 3.3 70B model
+#   • Initialises and exposes the Groq-hosted chat model
 #     as a reusable LangChain ChatModel instance.
 #   • Defines ALL Pydantic v2 schemas used as structured outputs
 #     across the entire agent system.
@@ -38,7 +38,7 @@ def get_llm(
     streaming: bool = False,
 ) -> ChatGroq:
     """
-    Factory that returns a ChatGroq instance pointing at Llama 3.3 70B.
+    Factory that returns a ChatGroq instance for the configured model.
 
     Parameters
     ----------
@@ -57,7 +57,7 @@ def get_llm(
 
     llm = ChatGroq(
         api_key=llm_config.groq_api_key,   # Auth token from config
-        model=llm_config.model_name,        # "llama-3.3-70b-versatile"
+        model=llm_config.model_name,        # e.g. "openai/gpt-oss-120b"
         temperature=temp,                   # Sampling temperature
         max_tokens=tokens,                  # Response length cap
         timeout=llm_config.timeout,         # Request timeout in seconds
@@ -235,6 +235,30 @@ class FoodOutput(BaseModel):
 
 # ── 2f. Master Travel Plan Schema ───────────────────────────
 
+class PlanSynthesis(BaseModel):
+    """
+    The only part of the final plan the LLM actually authors.
+
+    Everything else on TravelPlan is already known in Python — the request
+    fields come from the user and the five sub-plans are attached directly.
+    Asking the model for the whole nested TravelPlan made every run fail to
+    parse (it wrapped the trip fields in a "request" object), which silently
+    threw away the synthesis and fell back to a canned summary. Asking for
+    three fields instead is far harder to get wrong.
+    """
+    executive_summary: str = Field(
+        description="2-3 sentence overview of the complete travel plan"
+    )
+    overall_confidence: float = Field(
+        ge=0.0, le=1.0,
+        description="Weighted mean of agent confidences, adjusted for consistency"
+    )
+    consistency_warnings: List[str] = Field(
+        default_factory=list,
+        description="Inconsistencies found across the sub-plans (dates, costs, nights)"
+    )
+
+
 class TravelPlan(BaseModel):
     """
     The final aggregated travel plan produced by FinalPlannerAgent.
@@ -262,8 +286,35 @@ class TravelPlan(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     rag_context_used: bool = Field(
         default=False,
-        description="Whether RAG retrieval enriched this plan"
+        description=(
+            "True only when the knowledge base supplied destination-specific "
+            "context. False means the plan rests on the model's own knowledge."
+        ),
     )
+    rag_grounding: Dict[str, bool] = Field(
+        default_factory=dict,
+        description=(
+            "Per-area grounding {general, hotel, food}: was destination-specific "
+            "knowledge retrieved, or only generic travel advice?"
+        ),
+    )
+    data_sources: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Provenance per tool: {weather: live|curated|mock, ...}. "
+            "'mock' means that section rests on hardcoded fixtures, not real data."
+        ),
+    )
+
+    @property
+    def mocked_sources(self) -> List[str]:
+        """Tools whose data was fabricated. Empty list = every section is real."""
+        return sorted(k for k, v in self.data_sources.items() if v == "mock")
+
+    @property
+    def is_fully_live(self) -> bool:
+        """True only when no section of the plan rests on fixture data."""
+        return bool(self.data_sources) and not self.mocked_sources
 
 
 # ── 2g. Agent State Schema (used by LangGraph) ──────────────
@@ -296,6 +347,7 @@ __all__ = [
     "get_llm",
     "TravelRequest",
     "TravelPlan",
+    "PlanSynthesis",
     "RouteOutput",
     "WeatherOutput",
     "HotelOutput",
