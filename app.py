@@ -268,23 +268,30 @@ def start_planning(origin, destination, departure, return_dt, travellers,
 # ══════════════════════════════════════════════════════════════
 # Results
 # ══════════════════════════════════════════════════════════════
+# What a traveller is told when part of the plan is missing.
+#
+# The technical cause — rate limits, token budgets, missing API keys — is
+# recorded in the logs, the trace and the downloaded JSON. It is deliberately
+# NOT on screen: someone waiting for an itinerary cannot edit a .env file, and
+# a stack-trace-flavoured message in front of them just erodes trust in the
+# parts of the plan that ARE fine.
 MISSING_HINT = {
     "rate_limit": (
-        "The AI service is rate-limiting us right now.",
-        "Wait a moment and try again.",
+        "We're at our limit for the moment.",
+        "This part of the plan couldn't be finished. Everything else below is "
+        "ready — try again shortly for the rest.",
     ),
     "empty_response": (
-        "The model ran out of room before finishing this section.",
-        "Re-planning usually fixes it. If it keeps happening, raise "
-        "LLM_MAX_TOKENS in your .env.",
+        "This part didn't finish.",
+        "Trying again usually sorts it. The rest of the plan is unaffected.",
     ),
     "auth": (
-        "We couldn't reach the AI service.",
-        "The API key looks missing or invalid — check GROQ_API_KEY in your .env.",
+        "We can't reach the planning service right now.",
+        "Please try again in a few minutes.",
     ),
     "error": (
-        "Something went wrong building this section.",
-        "Re-planning usually fixes it.",
+        "We couldn't build this part of the plan.",
+        "Trying again usually sorts it. The rest of the plan is unaffected.",
     ),
 }
 
@@ -312,19 +319,14 @@ def failure_message() -> tuple:
 
     if "rate_limit" in kinds:
         rl = next(f for f in failures if f.get("kind") == "rate_limit")
-        wait = rl.get("retry_after") or "a few minutes"
+        wait = rl.get("retry_after")
+        when = f"Try again in {wait}." if wait else "Try again shortly."
         if rl.get("daily"):
-            return (
-                "You've used up today's AI quota.",
-                f"The free Groq tier allows 200,000 tokens per day and a full plan "
-                f"needs around 20,000. It resets in {wait}. You can also raise the "
-                f"limit on your Groq billing page.",
-            )
-        return (
-            "The AI service is rate-limiting us right now.",
-            f"The free tier allows 8,000 tokens per minute and a full plan needs "
-            f"more than that, so calls get queued. Try again in {wait}.",
-        )
+            return ("We've reached today's limit.",
+                    f"This part of the plan couldn't be finished. {when}")
+        return ("We're at our limit for the moment.",
+                f"This part of the plan couldn't be finished. {when} "
+                "Everything else below is ready.")
 
     for k in ("auth", "empty_response", "error"):
         if k in kinds:
@@ -534,16 +536,90 @@ def render_plan() -> None:
     if c3.button("Plan another trip", type="secondary", use_container_width=True):
         reset(); st.rerun()
 
-    warnings = [w for w in (plan.warnings or []) if not w.startswith("[DataSources]")]
+    warnings = traveller_notes(plan, req)
     if warnings:
-        with st.expander(f"Things worth checking ({len(warnings)})"):
+        with st.expander(f"Before you book ({len(warnings)})"):
             for w in warnings:
-                clean = w.split("] ", 1)[-1] if w.startswith("[") else w
                 st.markdown(
-                    f'<div style="padding:0.3rem 0;font-size:0.9rem;color:#9AA5B8;">'
-                    f"· {esc(clean)}</div>",
+                    f'<div style="padding:0.35rem 0;font-size:0.9rem;color:#9AA5B8;">'
+                    f"· {esc(w)}</div>",
                     unsafe_allow_html=True,
                 )
+
+
+# ── Which warnings a traveller should actually see ───────────
+# The guardrails emit ~20 different warnings. Most are engineering
+# diagnostics — "returned None, parsing likely failed", "output has no
+# confidence field", "no tool provenance recorded". They are valuable in the
+# logs and in Langfuse, and meaningless to someone planning a holiday, who
+# cannot act on any of them.
+#
+# So warnings are filtered rather than dumped. Anything a traveller can act on
+# is rewritten in plain words; everything else is dropped from the UI only —
+# it stays in plan.warnings, the downloaded JSON, the logs and the trace.
+
+# Substrings that mark a warning as internal. Matched case-insensitively.
+_INTERNAL_WARNING_MARKERS = (
+    "returned none",
+    "parsing likely failed",
+    "check llm output format",
+    "no confidence field",
+    "confidence",
+    "provenance",
+    "unparseable",
+    "executive summary is missing",
+    "options returned",          # "No budget hotel options returned"
+    "has no day-wise itinerary",
+    "has no activities listed",
+    "[datasources]",             # already shown as the provenance banner
+    "knowledge base has no entries",   # already shown as its own notice
+)
+
+
+def traveller_notes(plan, req) -> list:
+    """
+    Turn raw guardrail warnings into things a traveller can act on.
+
+    Returns plain sentences, or an empty list — in which case the UI shows no
+    section at all rather than an empty box.
+    """
+    notes: list = []
+
+    for raw in (plan.warnings or []):
+        text = raw.split("] ", 1)[-1] if raw.startswith("[") else raw
+        lowered = raw.lower()
+
+        if any(marker in lowered for marker in _INTERNAL_WARNING_MARKERS):
+            continue
+
+        # The final planner spotting a genuine contradiction is worth showing.
+        if raw.startswith("[Synthesis]"):
+            notes.append(text)
+            continue
+
+        # Anything left that reads like a sentence for a person, keep.
+        if text and not text.startswith("["):
+            notes.append(text)
+
+    # Facts worth flagging that the guardrails phrase too technically.
+    if plan.budget and req:
+        try:
+            over = plan.budget.total_trip_cost_usd - req.budget_usd
+            if over > 0:
+                notes.insert(0, (
+                    f"The estimated cost of ${plan.budget.total_trip_cost_usd:,.0f} "
+                    f"is ${over:,.0f} above the ${req.budget_usd:,.0f} you set."
+                ))
+        except (TypeError, AttributeError):
+            pass
+
+    # De-duplicate while keeping order.
+    seen, unique = set(), []
+    for n in notes:
+        if n not in seen:
+            seen.add(n)
+            unique.append(n)
+    return unique
 
 
 def render_itinerary(plan) -> None:
