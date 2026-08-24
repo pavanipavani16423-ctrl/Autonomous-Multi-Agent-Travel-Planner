@@ -72,6 +72,7 @@ There's a full architecture diagram in
 | Document | For |
 |---|---|
 | [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md) | The whole system in plain English. Start here. |
+| [`FILES.md`](FILES.md) | What every folder and file is, and how to pull the latest code. |
 | [`CLAUDE.md`](CLAUDE.md) | Technical detail and the traps, for whoever edits the code. |
 | [`DEPLOY.md`](DEPLOY.md) | Hosting notes. |
 
