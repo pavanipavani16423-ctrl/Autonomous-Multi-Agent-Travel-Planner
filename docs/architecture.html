@@ -1,0 +1,285 @@
+<title>Voyager Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    --ink:     #0B0E14;
+    --border:  #232A38;
+    --text:    #E8EBF0;
+    --muted:   #9AA5B8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ink); color: var(--text);
+    font-family: Inter, -apple-system, sans-serif;
+    margin: 0; padding: 0 16px 48px;
+  }
+  .wrap { max-width: 1440px; margin: 0 auto; }
+  figure { margin: 0; overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 1100px; height: auto; }
+  figcaption {
+    max-width: 900px; margin: 8px auto 0; padding-top: 18px;
+    border-top: 1px solid var(--border);
+    color: var(--muted); font-size: .88rem; line-height: 1.6; min-width: 1100px;
+  }
+  @media print { body { background: #fff; } }
+
+  /* diagram type — kept out of the SVG so there is one stylesheet */
+  .t     { font-family: Inter, sans-serif; }
+  .mono  { font-family: "JetBrains Mono", monospace; }
+  .h1    { font-size: 40px; font-weight: 700; fill: #E8EBF0; }
+  .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .22em; fill: #E0A458; }
+  .sub   { font-size: 15px; fill: #9AA5B8; }
+  .lab   { font-size: 15px; font-weight: 600; fill: #E8EBF0; }
+  .lab-s { font-size: 12.5px; fill: #9AA5B8; }
+  .tiny  { font-size: 11px; fill: #6B7789; }
+  .edge  { font-size: 11.5px; fill: #9AA5B8; }
+  .grp   { font-size: 12px; font-weight: 700; letter-spacing: .16em; }
+  .num   { font-size: 11px; font-weight: 700; letter-spacing: .1em; }
+  .flow  { stroke: #9AA5B8; stroke-width: 1.6; fill: none; }
+</style>
+
+<div class="wrap">
+<figure>
+<svg viewBox="0 0 1400 2085" role="img"
+     aria-label="Architecture of the Voyager travel planner. A trip request is checked, then retrieval searches an 8,161-passage guidebook and discards passages about other cities, while five tools fetch live data stamped with its provenance. Five specialist agents run in sequence, output checks add warnings, a final agent writes only the summary, and Python assembles the plan. Four memory layers sit on the left; honesty signals and quality checks on the right.">
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#9AA5B8"/>
+    </marker>
+    <marker id="a-rag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5FB88A"/>
+    </marker>
+    <marker id="a-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#E0A458"/>
+    </marker>
+    <marker id="a-tool" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#CC6B6B"/>
+    </marker>
+  </defs>
+
+  <!-- ══ HEADER ══ -->
+  <text x="700" y="52"  class="t eyebrow" text-anchor="middle">SYSTEM ARCHITECTURE</text>
+  <text x="700" y="100" class="t h1"      text-anchor="middle">Voyager — Grounded Travel Planner</text>
+  <text x="700" y="132" class="t sub"     text-anchor="middle">One trip request → seven AI steps, a filtered guidebook, and a plan that says which parts are real.</text>
+
+  <g transform="translate(360,164)">
+    <rect x="0"   y="0" width="13" height="13" rx="3" fill="none" stroke="#7AA2E3" stroke-width="1.6"/>
+    <text x="21"  y="11" class="t lab-s" fill="#7AA2E3">AI step</text>
+    <rect x="100" y="0" width="13" height="13" rx="3" fill="none" stroke="#5FB88A" stroke-width="1.6"/>
+    <text x="121" y="11" class="t lab-s" fill="#5FB88A">Guidebook / RAG</text>
+    <rect x="258" y="0" width="13" height="13" rx="3" fill="none" stroke="#CC6B6B" stroke-width="1.6"/>
+    <text x="279" y="11" class="t lab-s" fill="#CC6B6B">Live data</text>
+    <rect x="374" y="0" width="13" height="13" rx="3" fill="none" stroke="#E0A458" stroke-width="1.6"/>
+    <text x="395" y="11" class="t lab-s" fill="#E0A458">Memory</text>
+    <rect x="482" y="0" width="13" height="13" rx="3" fill="none" stroke="#B98BD9" stroke-width="1.6"/>
+    <text x="503" y="11" class="t lab-s" fill="#B98BD9">Quality</text>
+    <path d="M600 6.5 L607 0 L614 6.5 L607 13 z" fill="none" stroke="#9AA5B8" stroke-width="1.6"/>
+    <text x="622" y="11" class="t lab-s">Decision</text>
+  </g>
+
+  <!-- ══ 1. REQUEST ══ -->
+  <rect x="500" y="216" width="400" height="64" rx="10" fill="#171C27" stroke="#333C4E" stroke-width="1.5"/>
+  <text x="700" y="243" class="t lab"   text-anchor="middle">Trip request</text>
+  <text x="700" y="264" class="t lab-s" text-anchor="middle">from · to · dates · travellers · budget · diet</text>
+  <line x1="700" y1="280" x2="700" y2="312" class="flow" marker-end="url(#a)"/>
+
+  <!-- ══ 2. INPUT CHECK ══ -->
+  <path d="M700 316 L836 372 L700 428 L564 372 z" fill="#12161F" stroke="#9AA5B8" stroke-width="1.6"/>
+  <text x="700" y="366" class="t lab"   text-anchor="middle">Is the request sane?</text>
+  <text x="700" y="386" class="t lab-s" text-anchor="middle">dates, budget, banned words</text>
+  <line x1="836" y1="372" x2="946" y2="372" class="flow" marker-end="url(#a)"/>
+  <text x="891" y="363" class="t edge" text-anchor="middle">no</text>
+  <rect x="950" y="348" width="150" height="48" rx="8" fill="#241616" stroke="#CC6B6B" stroke-width="1.4"/>
+  <text x="1025" y="378" class="t lab-s" fill="#CC6B6B" text-anchor="middle">Stop — tell the user</text>
+  <line x1="700" y1="428" x2="700" y2="462" class="flow" marker-end="url(#a)"/>
+  <text x="716" y="450" class="t edge">yes</text>
+
+  <!-- ══ 3. GUIDEBOOK ══ -->
+  <rect x="384" y="466" width="632" height="446" rx="14" fill="#0E1A15" stroke="#5FB88A" stroke-width="1.6"/>
+  <text x="410" y="494" class="t grp" fill="#5FB88A">① THE GUIDEBOOK · look it up before answering</text>
+
+  <rect x="424" y="510" width="552" height="58" rx="9" fill="#12161F" stroke="#5FB88A" stroke-opacity=".55"/>
+  <text x="700" y="533" class="t lab"   text-anchor="middle">Search 8,161 passages · 53 cities</text>
+  <text x="700" y="554" class="t lab-s" text-anchor="middle">by meaning (vectors) + by exact words (BM25), then merged</text>
+  <line x1="700" y1="568" x2="700" y2="596" class="flow" marker-end="url(#a-rag)"/>
+
+  <path d="M700 600 L866 656 L700 712 L534 656 z" fill="#12161F" stroke="#5FB88A" stroke-width="1.8"/>
+  <text x="700" y="648" class="t lab"  text-anchor="middle" fill="#5FB88A">Is this passage</text>
+  <text x="700" y="668" class="t lab"  text-anchor="middle" fill="#5FB88A">about THIS city?</text>
+  <text x="700" y="688" class="t tiny" text-anchor="middle">every passage is tagged with its city</text>
+
+  <path d="M534 656 L470 656 L470 742" class="flow" stroke="#5FB88A" marker-end="url(#a-rag)"/>
+  <text x="500" y="646" class="t edge" fill="#5FB88A">yes</text>
+  <rect x="410" y="746" width="240" height="66" rx="9" fill="#14231B" stroke="#5FB88A" stroke-opacity=".6"/>
+  <text x="530" y="772" class="t lab"   text-anchor="middle" fill="#5FB88A">Use these passages</text>
+  <text x="530" y="792" class="t lab-s" text-anchor="middle" fill="#5FB88A">grounded = true</text>
+
+  <path d="M866 656 L930 656 L930 742" class="flow" stroke="#E0A458" marker-end="url(#a-acc)"/>
+  <text x="898" y="646" class="t edge" fill="#E0A458">no</text>
+  <rect x="750" y="746" width="240" height="66" rx="9" fill="#2A2113" stroke="#E0A458" stroke-opacity=".7"/>
+  <text x="870" y="768" class="t lab"   text-anchor="middle" fill="#E0A458">Throw it away</text>
+  <text x="870" y="787" class="t lab-s" text-anchor="middle" fill="#E0A458">“we know nothing here —</text>
+  <text x="870" y="803" class="t lab-s" text-anchor="middle" fill="#E0A458">don’t borrow another city”</text>
+
+  <text x="700" y="852" class="t lab-s" text-anchor="middle" fill="#5FB88A">Without this filter a Dubai plan quoted Bali’s dry season as fact.</text>
+  <text x="700" y="874" class="t tiny"  text-anchor="middle">Measured: 18/18 covered cities found · 18/18 uncovered cities refused · 0 leaks</text>
+
+  <line x1="700" y1="912" x2="700" y2="946" class="flow" marker-end="url(#a)"/>
+
+  <!-- ══ 4. LIVE DATA ══ -->
+  <rect x="384" y="950" width="632" height="150" rx="14" fill="#1A1113" stroke="#CC6B6B" stroke-width="1.6"/>
+  <text x="410" y="978" class="t grp" fill="#CC6B6B">② LIVE DATA · things that change by the hour</text>
+
+  <rect x="410" y="992" width="112" height="44" rx="7" fill="#12161F" stroke="#CC6B6B" stroke-opacity=".5"/>
+  <text x="466" y="1019" class="t lab-s" text-anchor="middle" fill="#E8EBF0">Weather</text>
+  <rect x="530" y="992" width="112" height="44" rx="7" fill="#12161F" stroke="#CC6B6B" stroke-opacity=".5"/>
+  <text x="586" y="1019" class="t lab-s" text-anchor="middle" fill="#E8EBF0">Maps</text>
+  <rect x="650" y="992" width="112" height="44" rx="7" fill="#12161F" stroke="#CC6B6B" stroke-opacity=".5"/>
+  <text x="706" y="1019" class="t lab-s" text-anchor="middle" fill="#E8EBF0">Hotels</text>
+  <rect x="770" y="992" width="112" height="44" rx="7" fill="#12161F" stroke="#CC6B6B" stroke-opacity=".5"/>
+  <text x="826" y="1019" class="t lab-s" text-anchor="middle" fill="#E8EBF0">Restaurants</text>
+  <rect x="890" y="992" width="106" height="44" rx="7" fill="#12161F" stroke="#CC6B6B" stroke-opacity=".5"/>
+  <text x="943" y="1019" class="t lab-s" text-anchor="middle" fill="#E8EBF0">Flights</text>
+
+  <text x="700" y="1060" class="t lab-s" text-anchor="middle" fill="#CC6B6B">Each answer is stamped &#160;live&#160; · &#160;curated&#160; · &#160;mock</text>
+  <text x="700" y="1082" class="t tiny"  text-anchor="middle">No API key → sample data. The stamp follows it to the screen, so nothing fake looks real.</text>
+
+  <line x1="700" y1="1100" x2="700" y2="1134" class="flow" marker-end="url(#a)"/>
+
+  <!-- ══ 5. SPECIALISTS ══ -->
+  <rect x="384" y="1138" width="632" height="356" rx="14" fill="#0F1520" stroke="#7AA2E3" stroke-width="1.6"/>
+  <text x="410" y="1166" class="t grp" fill="#7AA2E3">③ FIVE SPECIALISTS · one AI call each, in this order</text>
+
+  <rect x="440" y="1182" width="520" height="46" rx="8" fill="#12161F" stroke="#7AA2E3" stroke-opacity=".5"/>
+  <text x="466" y="1204" class="t num" fill="#7AA2E3">1</text>
+  <text x="492" y="1205" class="t lab">Weather</text>
+  <text x="700" y="1211" class="t lab-s">conditions, what to pack, warnings</text>
+  <path d="M700 1228 L700 1244" class="flow" marker-end="url(#a)"/>
+  <text x="960" y="1243" class="t tiny" text-anchor="end">weather first, so the route can avoid the rain</text>
+
+  <rect x="440" y="1248" width="520" height="46" rx="8" fill="#12161F" stroke="#7AA2E3" stroke-opacity=".5"/>
+  <text x="466" y="1270" class="t num" fill="#7AA2E3">2</text>
+  <text x="492" y="1271" class="t lab">Route</text>
+  <text x="700" y="1277" class="t lab-s">day-by-day itinerary and transport</text>
+  <path d="M700 1294 L700 1310" class="flow" marker-end="url(#a)"/>
+
+  <rect x="440" y="1314" width="520" height="46" rx="8" fill="#12161F" stroke="#7AA2E3" stroke-opacity=".5"/>
+  <text x="466" y="1336" class="t num" fill="#7AA2E3">3</text>
+  <text x="492" y="1337" class="t lab">Hotels</text>
+  <text x="700" y="1343" class="t lab-s">three price tiers + best area</text>
+  <path d="M700 1360 L700 1376" class="flow" marker-end="url(#a)"/>
+  <text x="960" y="1375" class="t tiny" text-anchor="end">reads route + hotels, so the numbers match</text>
+
+  <rect x="440" y="1380" width="520" height="46" rx="8" fill="#12161F" stroke="#7AA2E3" stroke-opacity=".5"/>
+  <text x="466" y="1402" class="t num" fill="#7AA2E3">4</text>
+  <text x="492" y="1403" class="t lab">Budget</text>
+  <text x="700" y="1409" class="t lab-s">flights, stay, food, transport, activities</text>
+  <path d="M700 1426 L700 1442" class="flow" marker-end="url(#a)"/>
+
+  <rect x="440" y="1446" width="520" height="46" rx="8" fill="#12161F" stroke="#7AA2E3" stroke-opacity=".5"/>
+  <text x="466" y="1468" class="t num" fill="#7AA2E3">5</text>
+  <text x="492" y="1469" class="t lab">Food</text>
+  <text x="700" y="1475" class="t lab-s">dishes, restaurants, dietary needs</text>
+
+  <line x1="700" y1="1494" x2="700" y2="1528" class="flow" marker-end="url(#a)"/>
+  <text x="716" y="1517" class="t tiny">a failed step = a missing section, never a crash</text>
+
+  <!-- ══ 6. OUTPUT CHECKS ══ -->
+  <rect x="470" y="1532" width="460" height="66" rx="10" fill="#171C27" stroke="#9AA5B8" stroke-width="1.4"/>
+  <text x="700" y="1558" class="t lab"   text-anchor="middle">Check the work</text>
+  <text x="700" y="1579" class="t lab-s" text-anchor="middle">days match the dates? over budget? sections missing?</text>
+  <line x1="700" y1="1598" x2="700" y2="1632" class="flow" marker-end="url(#a)"/>
+  <text x="716" y="1621" class="t tiny">problems become warnings, not failures</text>
+
+  <!-- ══ 7. FINAL PLANNER ══ -->
+  <rect x="440" y="1636" width="520" height="82" rx="10" fill="#0F1520" stroke="#7AA2E3" stroke-width="1.6"/>
+  <text x="700" y="1662" class="t lab"   text-anchor="middle" fill="#7AA2E3">Final planner — writes the summary ONLY</text>
+  <text x="700" y="1683" class="t lab-s" text-anchor="middle">3 fields: summary · confidence · contradictions spotted</text>
+  <text x="700" y="1703" class="t tiny"  text-anchor="middle">Asking the AI to build the whole plan failed on every single run.</text>
+  <line x1="700" y1="1718" x2="700" y2="1752" class="flow" marker-end="url(#a)"/>
+
+  <!-- ══ 8. ASSEMBLY ══ -->
+  <rect x="470" y="1756" width="460" height="64" rx="10" fill="#171C27" stroke="#333C4E" stroke-width="1.5"/>
+  <text x="700" y="1782" class="t lab"   text-anchor="middle">Plan assembled in Python</text>
+  <text x="700" y="1803" class="t lab-s" text-anchor="middle">ordinary code joins the five results — no AI involved</text>
+  <line x1="700" y1="1820" x2="700" y2="1854" class="flow" marker-end="url(#a)"/>
+
+  <!-- ══ 9. OUTPUT ══ -->
+  <rect x="440" y="1858" width="520" height="86" rx="10" fill="#2A2113" stroke="#E0A458" stroke-width="1.8"/>
+  <text x="700" y="1886" class="t lab"   text-anchor="middle" fill="#E0A458">THE TRAVEL PLAN</text>
+  <text x="700" y="1908" class="t lab-s" text-anchor="middle" fill="#E0A458">itinerary · stay · food · weather · budget</text>
+  <text x="700" y="1929" class="t lab-s" text-anchor="middle" fill="#E0A458">on screen + downloadable PDF</text>
+
+  <!-- ══ LEFT · MEMORY ══ -->
+  <rect x="40" y="466" width="310" height="292" rx="12" fill="#12161F" stroke="#E0A458" stroke-width="1.6"/>
+  <text x="64" y="496" class="t grp" fill="#E0A458">MEMORY · 4 LAYERS</text>
+
+  <text x="64" y="530" class="t lab" fill="#E0A458">Working</text>
+  <text x="64" y="549" class="t lab-s">notes passed between steps,</text>
+  <text x="64" y="565" class="t lab-s">saved so a crash can be read</text>
+
+  <text x="64" y="594" class="t lab" fill="#E0A458">Semantic</text>
+  <text x="64" y="613" class="t lab-s">the guidebook — 8,161 passages</text>
+
+  <text x="64" y="642" class="t lab" fill="#E0A458">Episodic</text>
+  <text x="64" y="661" class="t lab-s">every past plan. Same trip twice</text>
+  <text x="64" y="677" class="t lab-s">= instant (219s → 0.0s)</text>
+
+  <text x="64" y="706" class="t lab" fill="#E0A458">Procedural</text>
+  <text x="64" y="725" class="t lab-s">how each agent is told to work —</text>
+  <text x="64" y="741" class="t lab-s">its rules, steps and examples</text>
+
+  <path d="M350 612 L384 612" class="flow" stroke="#E0A458" marker-end="url(#a-acc)"/>
+  <path d="M195 758 L195 1890 L440 1890" class="flow" stroke="#E0A458" stroke-dasharray="5 5" marker-end="url(#a-acc)"/>
+  <text x="205" y="1330" class="t edge" fill="#E0A458" transform="rotate(-90 205 1330)" text-anchor="middle">remember this plan</text>
+
+  <!-- ══ RIGHT · HONESTY ══ -->
+  <rect x="1050" y="950" width="310" height="216" rx="12" fill="#12161F" stroke="#CC6B6B" stroke-width="1.4"/>
+  <text x="1074" y="980" class="t grp" fill="#CC6B6B">TELLING THE TRUTH</text>
+  <text x="1074" y="1010" class="t lab-s">If any figure is sample data, the</text>
+  <text x="1074" y="1026" class="t lab-s">plan says so and lowers its own</text>
+  <text x="1074" y="1042" class="t lab-s">confidence to match.</text>
+  <text x="1074" y="1074" class="t lab-s" fill="#CC6B6B">Before: 24°C for Dubai at 90%</text>
+  <text x="1074" y="1092" class="t lab-s" fill="#CC6B6B">confidence — from a fixture.</text>
+  <text x="1074" y="1110" class="t lab-s" fill="#5FB88A">After: labelled illustrative,</text>
+  <text x="1074" y="1128" class="t lab-s" fill="#5FB88A">confidence drops to 44%.</text>
+  <text x="1074" y="1152" class="t tiny">Two signals, two different fixes.</text>
+  <path d="M1050 1058 L1016 1058" class="flow" stroke="#CC6B6B" marker-end="url(#a-tool)"/>
+
+  <!-- ══ RIGHT · QUALITY ══ -->
+  <rect x="1050" y="1532" width="310" height="286" rx="12" fill="#12161F" stroke="#B98BD9" stroke-width="1.4"/>
+  <text x="1074" y="1562" class="t grp" fill="#B98BD9">CHECKING QUALITY</text>
+
+  <text x="1074" y="1596" class="t lab" fill="#B98BD9">The six checks</text>
+  <text x="1074" y="1618" class="t lab-s">Six pass/fail tests on the finished</text>
+  <text x="1074" y="1634" class="t lab-s">plan: did every section arrive, is</text>
+  <text x="1074" y="1650" class="t lab-s">the summary real, does the day</text>
+  <text x="1074" y="1666" class="t lab-s">count match the dates.</text>
+  <text x="1074" y="1688" class="t tiny">Plain code, no AI. This is what</text>
+  <text x="1074" y="1704" class="t tiny">decides if a change can ship.</text>
+
+  <text x="1074" y="1738" class="t lab" fill="#B98BD9">RAGAS</text>
+  <text x="1074" y="1760" class="t lab-s">Scores 0–1: did we make it up,</text>
+  <text x="1074" y="1776" class="t lab-s">and did we answer the question?</text>
+  <text x="1074" y="1798" class="t tiny">The only check that reads the</text>
+  <text x="1074" y="1814" class="t tiny">content, not just the shape.</text>
+  <path d="M1050 1660 L1016 1660 L1016 1670" class="flow" stroke="#B98BD9" marker-end="url(#a)"/>
+
+  <!-- ══ FOOTER ══ -->
+  <line x1="40" y1="1990" x2="1360" y2="1990" stroke="#232A38" stroke-width="1"/>
+  <text x="700" y="2020" class="t lab-s" text-anchor="middle" fill="#E0A458">Streamlit · LangGraph · Groq (gpt-oss-120b) · ChromaDB + BM25 · Wikivoyage · Langfuse · RAGAS · SQLite</text>
+  <text x="700" y="2044" class="t tiny" text-anchor="middle">Every figure on this page comes from a measured run, not an estimate.</text>
+</svg>
+</figure>
+
+<figcaption>
+The two decisions that shape everything: <strong>“is this passage about this city?”</strong> — which stops
+the planner borrowing another destination’s facts — and <strong>“is this figure real or sample data?”</strong>
+— which stops a plan built on fixtures looking identical to one built on live prices.
+Everything else is a straight line from a request to a plan.
+</figcaption>
+</div>

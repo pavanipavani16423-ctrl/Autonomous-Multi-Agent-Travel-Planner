@@ -1,144 +1,143 @@
----
-title: Voyager AI Travel Planner
-emoji: 🧭
-colorFrom: yellow
-colorTo: gray
-sdk: docker
-app_port: 8501
-pinned: false
-license: mit
-short_description: Multi-agent travel planner with grounded retrieval
----
+# Autonomous Multi-Agent Travel Planner
 
-🌍 Autonomous Multi-Agent Travel Planner
+**[▶ Try the live app](https://autonomous-multi-agent-travel-planner-pnmjkcxhpddthjhxeu5nzc.streamlit.app/)**
 
-«Transforming travel planning with the power of Autonomous AI Agents.»
+Tell it where you're going, your dates and a budget. A few minutes later you
+get a complete travel plan — a day-by-day itinerary, places to stay, what to
+eat, the weather, and a costed budget — downloadable as a PDF.
 
-🚀 Overview
-
-Planning a trip often requires researching destinations, comparing options, estimating costs, and organizing schedules. This project automates that entire process using a team of intelligent AI agents that collaborate to create personalized travel plans.
-
-The Autonomous Multi-Agent Travel Planner leverages Generative AI, LangGraph, and LangChain to simulate a real-world travel planning team. Each agent is responsible for a specific task such as destination research, itinerary generation, budget estimation, and travel recommendations.
-
-The system also integrates Langfuse for observability and RAGAS for response evaluation, enabling transparency and quality assessment of AI-generated outputs.
+Built with LangGraph, Groq, ChromaDB and Streamlit.
 
 ---
 
-✨ Key Features
+## What makes it different
 
-🤖 Multi-Agent Collaboration
+Most LLM travel demos produce a confident plan and give you no way to tell
+which parts are real. This one tells you.
 
-Multiple specialized AI agents work together to solve complex travel-planning tasks.
+**It knows when it doesn't know.** The knowledge base covers 53 cities. Ask
+about one it doesn't cover and it says so, rather than quietly answering with
+a *different* city's facts — which is exactly what a plain vector search does,
+because it always returns its nearest matches and has no way to say "nothing
+here is relevant."
 
-🗺️ Intelligent Destination Research
+> Measured: **18/18** covered cities correctly grounded · **18/18** uncovered
+> cities correctly refused · **0** wrong-city facts leaked.
 
-Analyzes destinations and recommends locations based on user preferences.
+**It labels data it made up.** Without API keys the weather and price services
+return sample figures. Every value is stamped `live`, `curated` or `mock`, and
+that stamp follows it to the screen and into the PDF. If part of a plan is
+illustrative, the plan says so and lowers its own confidence to match.
 
-📅 Personalized Itinerary Generation
-
-Creates day-by-day travel schedules tailored to user requirements.
-
-💰 Budget Estimation
-
-Provides estimated costs for travel, accommodation, and activities.
-
-📊 AI Response Evaluation
-
-Uses RAGAS metrics to evaluate the quality and reliability of generated travel plans.
-
-🔍 Observability & Monitoring
-
-Tracks agent interactions and workflow execution through Langfuse.
-
-🎨 Interactive User Interface
-
-User-friendly Streamlit interface for seamless travel planning.
+**Its quality is measured, not asserted.** Six automatic pass/fail checks run
+on every plan and block a release if any fail. They have already caught two
+bugs that had been silently broken for weeks.
 
 ---
 
-🏗️ System Architecture
+## How it works
 
-User Query
-↓
-Travel Planner Interface (Streamlit)
-↓
-LangGraph Workflow
-↓
-├── Research Agent
-├── Destination Agent
-├── Budget Agent
-├── Itinerary Agent
-↓
-Aggregated Travel Plan
-↓
-Langfuse Monitoring
-↓
-RAGAS Evaluation
+```
+Trip request
+   ↓
+Is the request sane?  ──no──▶  stop, explain why
+   ↓ yes
+① Search the guidebook   8,161 passages · 53 cities
+     hybrid search, then discard passages about other cities
+   ↓
+② Call live services     weather · maps · hotels · restaurants · flights
+     each answer stamped live / curated / mock
+   ↓
+③ Five specialists       weather → route → hotels → budget → food
+     one AI call each, in dependency order
+   ↓
+Check the work           days match dates? over budget? sections missing?
+   ↓
+Final planner            writes ONLY the summary + confidence
+   ↓
+Plan assembled in Python
+   ↓
+Itinerary on screen + PDF
+```
 
----
+A failed step becomes a missing section with an explanation — never a crash.
 
-🛠️ Technology Stack
-
-Category| Technologies
-Programming Language| Python
-Frontend| Streamlit
-Agent Orchestration| LangGraph
-LLM Framework| LangChain
-Monitoring| Langfuse
-Evaluation| RAGAS
-AI Models| LLM-based Models
+There's a full architecture diagram in
+[`docs/architecture.html`](docs/architecture.html) (open it in a browser).
 
 ---
 
-🎯 Project Objectives
+## Documentation
 
-- Automate travel planning using AI agents
-- Reduce manual research effort
-- Generate personalized travel recommendations
-- Evaluate AI-generated responses systematically
-- Demonstrate real-world multi-agent AI workflows
-
----
-
-📈 Workflow
-
-1. User enters travel preferences.
-2. Research Agent gathers destination insights.
-3. Budget Agent estimates travel expenses.
-4. Itinerary Agent creates a detailed travel schedule.
-5. Results are displayed through Streamlit.
-6. Langfuse captures execution traces.
-7. RAGAS evaluates response quality.
+| Document | For |
+|---|---|
+| [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md) | The whole system in plain English. Start here. |
+| [`CLAUDE.md`](CLAUDE.md) | Technical detail and the traps, for whoever edits the code. |
+| [`DEPLOY.md`](DEPLOY.md) | Hosting notes. |
 
 ---
 
-🔮 Future Enhancements
+## Running it locally
 
-- Flight and hotel integration
-- Real-time weather recommendations
-- Interactive travel maps
-- Multi-language support
-- Voice-based travel planning
-- Advanced budget optimization
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Create a `.env` file with one required line:
+
+```
+GROQ_API_KEY=your_key_from_console.groq.com
+LLM_MODEL=openai/gpt-oss-120b
+```
+
+The first start takes ~5 extra minutes while it builds the search index from
+`data/corpus.jsonl` (the 53 city guides, already in the repo). That happens
+once and needs no internet. Every start after that is fast.
+
+Weather, maps, hotel and flight keys are optional — without them those
+sections use clearly-labelled sample data.
+
+### Useful commands
+
+```bash
+python -m rag.ingest --list        # which cities are covered
+python -m rag.ingest --cities X    # add a city (keeps the existing ones)
+python -m rag.ingest --check       # prove the wrong-city filter works
+python -m rag.ingest --backlog     # cities users wanted that we lack
+python -m eval.harness             # the six checks — PASS or FAIL
+python -m eval.harness --ragas     # plus RAGAS retrieval scoring
+```
 
 ---
 
-📷 Sample Use Cases
+## Built with
 
-- Family Vacation Planning
-- Solo Travel Planning
-- Business Trip Scheduling
-- Budget Travel Recommendations
-- Destination Exploration
-
----
-
-👩‍💻 Author
-
-Pavani
-
-Passionate about Artificial Intelligence, Multi-Agent Systems, and Generative AI applications.
+**LangGraph** state machine · **Groq** (`openai/gpt-oss-120b`) ·
+**ChromaDB** + **BM25** hybrid retrieval · **Wikivoyage** knowledge base ·
+**Pydantic** schemas · **Langfuse** tracing · **RAGAS** evaluation ·
+**Streamlit** UI · **ReportLab** PDF export · **SQLite** memory
 
 ---
 
-⭐ If you found this project interesting, consider giving it a star on GitHub!
+## Known limits
+
+Worth knowing before you try it:
+
+- **A plan takes 3–5 minutes.** Seven AI calls run in sequence.
+- **The free Groq tier allows roughly 10 plans a day.** Identical trips are
+  cached and return instantly at no cost.
+- **The hosted app forgets on restart.** Plan history and cache reset when the
+  free instance sleeps.
+- **Retrieval is stronger than generation.** The right passages are provably
+  retrieved, but the agents lean more on the model's own knowledge than on
+  them. Measured and documented in `HOW-IT-WORKS.md` — it's the next thing to
+  improve.
+
+---
+
+## Author
+
+**Pavani** — Artificial Intelligence, Multi-Agent Systems and Generative AI.
+
+⭐ If you found this interesting, consider starring the repo.
