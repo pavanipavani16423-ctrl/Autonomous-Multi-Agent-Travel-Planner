@@ -205,10 +205,6 @@ The instructions we give the AI are version-numbered (currently `v3`). Every
 plan records which version produced it, so you can ask "did my prompt change
 make things better or worse?" and get a real answer:
 
-```bash
-python -m eval.harness --compare
-```
-
 ### One idea we deliberately did NOT build
 
 A common design is: summarise past plans into "learned facts" and feed them
@@ -268,20 +264,20 @@ keys, the other needs the city ingested.
 
 ---
 
-## 8. RAGAS and the quality gate
+## 8. How we check the quality
 
-Two separate systems. Don't confuse them.
+Two checks, answering two different questions.
 
-### The gate — decides whether to release
+### Check 1 - "is the app still working?"
 
-Six checks, all plain code, no AI involved:
+Six automatic tests. All plain code, no AI involved:
 
-| Check | Passes when |
+| Test | Passes when |
 |---|---|
-| A plan was produced | always required |
-| All 5 sections present | all parsed successfully |
+| A plan came out | always required |
+| All 5 sections present | nothing failed to parse |
 | Summary is real | not the fallback template |
-| Itinerary matches dates | day count is right |
+| Days match the dates | day count is correct |
 | No errors | zero |
 | Not too slow | under 7 minutes |
 
@@ -289,133 +285,62 @@ Six checks, all plain code, no AI involved:
 python -m eval.harness
 ```
 
-Exits with an error if anything fails. **This is what decides whether a change
-is safe to ship.**
+It prints a table and says PASS or FAIL. **Run it after changing anything.**
+If it fails, something is broken - don't ship it. It has already caught two
+real bugs that had been quietly broken for a long time.
 
-It has already caught two real bugs: the summary silently falling back to a
-template on every run, and a prompt that was too large for the AI service to
-accept.
+### Check 2 - "is the guidebook actually helping?"
 
-### RAGAS — a second opinion, not a gate
+This is what RAGAS is for. RAGAS is a standard tool for grading
+look-it-up-then-answer systems. It gives two scores, each from 0 to 1, higher
+is better:
 
-RAGAS asks an AI to grade our AI. Two scores:
-
-- **Faithfulness** — breaks our answer into individual claims and checks each
-  one against the guidebook text we retrieved. *"Did you make this up?"*
-- **Answer relevancy** — checks the answer actually addresses the question.
+- **Faithfulness** - breaks our answer into individual claims and checks each
+  one against the guidebook text we looked up.
+  *"Did we make this up, or is it really in the guidebook?"*
+- **Answer relevancy** - *"Did we answer the question that was actually
+  asked?"*
 
 ```bash
 python -m eval.harness --ragas
 ```
 
-**It has no thresholds and does not block anything.** Deliberately: it uses
-the same AI model family that wrote the answer, so it shares the same blind
-spots. A judge that thinks like the defendant shouldn't decide the verdict.
+**These scores do not block anything.** They are information, not a gate.
+RAGAS uses an AI to grade our AI, and it is the same kind of AI - so it shares
+the same blind spots. Useful as a second opinion; not trustworthy enough to
+decide what ships.
 
-### What RAGAS told us — and it's uncomfortable
+### What it told us
 
 ```
 faithfulness      0.0
 answer relevancy  0.57
 ```
 
-Faithfulness near zero means **the agents mostly don't use the guidebook text
-we retrieve.** They write from the AI's own knowledge and from the API data,
-treating the guidebook as background reading.
+Faithfulness near zero means **the agents mostly are not using the guidebook
+text.** They write from the AI's own knowledge and from the API data instead.
 
-Two things are true about that number:
+Two things are true about that:
 
-1. **It's partly real.** The hotel names come from sample data, the restaurant
+1. **Partly real.** The hotel names come from sample data, the restaurant
    names from a built-in list, the flight details from the AI's own knowledge.
-   Very little is quoted from the guidebook.
-2. **It's partly an unfair test.** One of the three checks compares a *flight
-   plan* against a *city-overview page*. A guidebook page about Paris crowds
-   can never support "the flight takes 9 hours." That test was set up to score
-   zero regardless.
+   Very little is actually quoted from the guidebook.
+2. **Partly an unfair test.** One of the three checks compares a *flight plan*
+   against a *general city page*. A page about Paris crowds can never support
+   "the flight takes 9 hours" - that test was always going to score zero.
 
-Neither is a reason to hide it. The retrieval provably works — 18 out of 18
-covered cities found, 18 out of 18 uncovered cities correctly refused, zero
-wrong-city leaks. What RAGAS shows is that the *writing* step under-uses what
-retrieval found. That's a real, measurable gap and a sensible next thing to
+Neither is a reason to hide the number. The looking-up part provably works:
+18 out of 18 covered cities found, 18 out of 18 uncovered cities correctly
+refused, no wrong-city leaks. What this score shows is that the *writing* step
+under-uses what the look-up found. That is the most sensible next thing to
 improve.
 
-**Note:** there are threshold numbers in `evaluation.py` (0.70, 0.60...).
-**That file is dead — nothing imports it.** Ignore it or delete it.
+**Note:** `evaluation.py` contains threshold numbers (0.70, 0.60...). **That
+file is dead - nothing uses it.** Ignore it or delete it.
 
 ---
 
-## 9. Improving the prompts (the "self-improving" part)
-
-The instructions we send the AI are called prompts. Changing a word can make
-plans noticeably better or noticeably worse, and you usually cannot tell by
-reading — only by measuring.
-
-The original goal was a system that **rewrites its own prompts**: try a
-change, score it, keep it if the score improves. We built one half of that and
-deliberately left the other half out.
-
-### What exists: you can prove whether a change helped
-
-Every prompt version has a number. It sits at the top of
-`prompts/prompts.py`:
-
-```python
-PROMPT_VERSION = "v3"
-```
-
-Every plan records which version produced it, along with its scores. So:
-
-```bash
-python -m eval.harness --compare
-```
-
-gives you a table — one row per version, showing how complete the plans were,
-whether summaries worked, how well grounded they were, how long they took.
-"Did my change help?" becomes a number instead of an opinion.
-
-**The workflow for changing a prompt:**
-
-1. Run `python -m eval.harness` first, so you know the current state
-2. Edit the prompt
-3. Bump `PROMPT_VERSION` (v3 → v4)
-4. Run the harness again
-5. Compare with `--compare`
-6. Better → keep it. Worse → revert. The gate blocks obvious breakage either
-   way
-
-That loop is genuinely the valuable part. It has already caught two real bugs
-that had been silently broken for a long time.
-
-### What does NOT exist: the AI rewriting its own prompts
-
-No automatic rewriting, and no automatic releasing. That was a decision, not
-something unfinished.
-
-**Why not:**
-
-- **Nothing tells us a plan was actually good.** No user ever says "this
-  itinerary was useful." Without that signal, an automatic optimiser just
-  drifts toward whatever the scoring happens to reward — which is not the same
-  as being helpful to a traveller.
-- **Our scores are too few and too coarse to optimise against.** Six pass/fail
-  checks. An optimiser would find ways to satisfy them that a person would
-  consider cheating.
-- **Shipping unreviewed prompt changes is a liability.** A prompt is what
-  makes the system behave sensibly and safely. Changing it automatically, with
-  nobody reading the change, is how a system quietly starts producing
-  confident nonsense at 3am.
-
-**When it would become a good idea:** once real users can rate plans, or once
-you can see which plans people actually booked from. Then there is a real
-signal to optimise toward, and automatic tuning starts being an improvement
-rather than a drift.
-
-Until then: measure automatically, change by hand. That is a normal, sane
-place for a system this size to sit — not a missing feature.
-
----
-
-## 10. Known rough edges
+## 9. Known rough edges
 
 Nothing here is hidden; it's all worth knowing.
 
@@ -429,11 +354,10 @@ Nothing here is hidden; it's all worth knowing.
   live code is in the folders. **Editing the top-level copies does nothing.**
 - **`evaluation.py` and `langfuse_config.py` are dead too.**
 - **Faithfulness is low** — see section 8.
-- **Prompts are improved by hand, not automatically** — see section 9.
 
 ---
 
-## 11. Running it
+## 10. Running it
 
 ```bash
 pip install -r requirements.txt
@@ -456,7 +380,6 @@ python -m rag.ingest --list        # which cities we cover
 python -m rag.ingest --check       # prove the wrong-city filter works
 python -m rag.ingest --backlog     # cities people wanted that we lack
 python -m eval.harness             # the release gate
-python -m eval.harness --compare   # quality per prompt version
 python -m eval.harness --history   # recent plans
 ```
 
