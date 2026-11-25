@@ -47,7 +47,7 @@ assistant about it.
 - **Production behaviour.** Guardrails screen inputs (prompt injection, PII redaction, scope, date
   and budget sanity). Requests are rate-limited per IP. The LLM gateway uses structured output with
   JSON repair and a token budget per model. When a model's daily quota runs out it switches to the
-  next model instead of failing. Identical trips come from a semantic plan cache (0.7 s).
+  next model instead of failing. An identical request is answered from a plan cache (0.7 s).
 
 ## Architecture
 
