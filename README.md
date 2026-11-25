@@ -1,5 +1,9 @@
 # Voyager: a multi-agent AI travel planner
 
+**[▶ Try it live](https://voyager-travel-planner-green.vercel.app)** · [watch a recorded run](https://voyager-travel-planner-green.vercel.app/trip/demo) · API: [`/health/ready`](https://voyager-api-ujao.onrender.com/health/ready)
+
+> Free hosting: the API sleeps when idle, so the first plan of the day waits ~1 minute while it wakes up (the page shows this). A plan then takes ~30–90 s on the free 0.1-CPU instance.
+
 Describe a trip in one sentence. A team of AI agents researches it in parallel using **live data
 from MCP tool servers** and a **Qdrant hybrid-RAG guidebook**. A separate **Budget Analyst agent,
 called over the A2A protocol**, costs the plan, and a critic checks it before you see it. The result
