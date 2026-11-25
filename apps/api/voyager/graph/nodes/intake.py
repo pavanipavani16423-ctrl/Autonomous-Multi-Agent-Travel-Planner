@@ -15,6 +15,9 @@ from voyager.rag.store import get_guidebook
 from voyager.rag.text import destination_key
 from voyager.services.images import wikipedia_image
 
+# Guidebook destinations that are regions, not cities: geocode their main town instead.
+REGION_ANCHOR = {"goa": "Panaji", "bali": "Denpasar"}
+
 
 @agent_node("guard")
 async def guard(state: TripState, ctx: RunContext) -> dict[str, Any]:
@@ -63,18 +66,27 @@ async def brief(state: TripState, ctx: RunContext) -> dict[str, Any]:
         if book.ready:
             break
         await asyncio.sleep(0.5)
-    geo = await tools.call("places", "geocode", query=req.destination, kind="city", limit=3)
+    # A guidebook city pins the country, so "Goa" is Goa, India and not Goa in the Philippines; a
+    # region-type guide (Goa, Bali) is planned around its main town.
+    known = book.resolve(req.destination)
+    known_city = book.cities.get(known or "", {})
+    query = REGION_ANCHOR.get(known or "", req.destination)
+    if known_city.get("country"):
+        query = f"{query}, {known_city['country']}"
+    geo = await tools.call("places", "geocode", query=query, kind="city", limit=3)
     rows = geo.get("results") or []
+    if known_city.get("country"):  # never accept a same-name place in another country
+        rows = [r for r in rows if (r.get("country") or "").lower() == known_city["country"].lower()]
     if not rows:  # a landmark / region rather than a city: try the OSM geocoder
-        geo = await tools.call("places", "geocode", query=req.destination, kind="poi", limit=3)
+        geo = await tools.call("places", "geocode", query=query, kind="poi", limit=3)
         rows = geo.get("results") or []
     if not rows:
         return {"error": f"Could not locate '{req.destination}'.", "brief": {"located": False},
                 "_status": "error", "_message": f"Could not locate '{req.destination}' (geocoding unavailable)"}
     top = rows[0]
-    name = top.get("name") or req.destination
+    name = known_city.get("name") or top.get("name") or req.destination
     country, cc = top.get("country", ""), top.get("country_code", "")
-    key = book.resolve(name) or book.resolve(req.destination)
+    key = known or book.resolve(name)
     passages = book.passages_for(key)
     status, note = "covered", f"{passages} guidebook passages"
     image_task = asyncio.create_task(wikipedia_image(name, f"{name}, {country}", req.destination))
@@ -97,7 +109,7 @@ async def brief(state: TripState, ctx: RunContext) -> dict[str, Any]:
         "located": True, "name": name, "country": country, "country_code": cc,
         "lat": top["lat"], "lon": top["lon"], "timezone": top.get("timezone"), "population": top.get("population"),
         "key": key or destination_key(name), "guidebook": status, "passages": passages, "note": note,
-        "image": image, "fx": fx, "geocode_source": geo.get("source_url"),
+        "image": image, "fx": fx, "geocode_source": geo.get("source_url"), "region": known in REGION_ANCHOR,
     }
     evidence = {FRANKFURTER["id"]: FRANKFURTER} if fx.get("provenance") != "unavailable" else {}
     label = {"covered": "in the guidebook", "expanded": "guidebook expanded on demand",

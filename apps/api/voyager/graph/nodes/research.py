@@ -87,6 +87,10 @@ def named_in(name: str, passages: list[Any], ids: list[str]) -> bool:
     return len(n) >= 4 and any(n in norm(p.text) for p in passages if p.id in ids)
 
 
+_CHAIN_RE = re.compile(
+    r"\b(mcdonald'?s|kfc|burger king|domino'?s|pizza hut|subway|starbucks|dunkin|jollibee|andok'?s|"
+    r"wendy'?s|taco bell|papa john'?s|costa coffee|tim hortons|chowking|mang inasal|greenwich)\b", re.I)
+
 _GENERIC = {"parking", "area", "lot", "temple", "hindu", "mosque", "church", "shrine", "mandir", "park",
              "garden", "viewpoint", "museum", "lake", "the", "of", "public", "toilet", "entrance", "gate",
              "statue", "fountain", "playground", "point", "spot", "view", "jain", "sikh", "gurudwara"}
@@ -107,7 +111,7 @@ async def destination(state: TripState, ctx: RunContext) -> dict[str, Any]:
     req, b = req_of(state), state["brief"]
     city = b["name"]
     interests = ", ".join(req.interests) or "general sightseeing"
-    radius = 7000 if (b.get("population") or 0) > 1_000_000 else 4000
+    radius = 15000 if b.get("region") else 7000 if (b.get("population") or 0) > 1_000_000 else 4000
     tools = (await hub()).toolbox("destination", ctx.tool_emit)
     (sights, r1), (famous, r3), (context, r2), osm, landmarks = await asyncio.gather(
         retrieve(ctx, "destination", f"{city} top sights attractions {interests}", city, ["See", "Do"], k=8),
@@ -249,7 +253,7 @@ async def stays(state: TripState, ctx: RunContext) -> dict[str, Any]:
     (passages, rec), osm, profile = await asyncio.gather(
         retrieve(ctx, "stays", f"where to stay in {city} {req.stay_style} accommodation areas", city, ["Sleep"], k=5),
         tools.call("places", "search_places", lat=b["lat"], lon=b["lon"], kind=STYLE_KINDS[req.stay_style],
-                   radius_m=3500, limit=15),
+                   radius_m=12000 if b.get("region") else 3500, limit=15),
         tools.call("money", "cost_profile", country_code=b.get("country_code") or "", style=req.stay_style),
     )
     cands = osm.get("results") or []
@@ -353,9 +357,10 @@ async def food(state: TripState, ctx: RunContext) -> dict[str, Any]:
         retrieve(ctx, "food", f"{city} local food dishes where to eat {' '.join(req.diet)}", city,
                  ["Eat", "Drink"], k=6),
         tools.call("places", "search_places", lat=b["lat"], lon=b["lon"], kind="restaurant,cafe,street_food",
-                   radius_m=3000, limit=25),
+                   radius_m=12000 if b.get("region") else 3000, limit=25),
     )
-    cands = osm.get("results") or []
+    # a travel plan recommends local places, not global fast-food chains
+    cands = [c for c in osm.get("results") or [] if not _CHAIN_RE.search(c["name"])]
     cluster_areas(cands, b)
     known = {p.id for p in passages}
 
