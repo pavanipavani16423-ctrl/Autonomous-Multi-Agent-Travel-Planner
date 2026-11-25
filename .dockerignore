@@ -1,19 +1,17 @@
-__pycache__/
-*.pyc
-*.pyo
-venv/
-.venv/
-.env
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/.env
+**/node_modules/
+**/.next/
 .git/
+.github/
 .vscode/
 *.log
-.DS_Store
-Thumbs.db
-*.ipynb
-
-# Rebuilt inside the image from data/corpus.jsonl. Copying a host-built
-# index in is actively harmful: one written by a different chromadb
-# version is unreadable and silently disables dense retrieval.
-chroma_db/
-
-# data/corpus.jsonl is NOT excluded — the image build needs it.
+# runtime state never goes into an image (the index is built inside it from data/corpus.jsonl)
+data/qdrant/
+data/qdrant-*/
+data/models/
+data/eval/
+data/expanded.jsonl
+data/*.db*

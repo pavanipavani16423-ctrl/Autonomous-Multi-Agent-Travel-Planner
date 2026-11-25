@@ -1,83 +1,43 @@
-# ============================================================
-# render.yaml — Render Blueprint
-# ============================================================
-# Deploy: push to GitHub, then Render → New → Blueprint → pick this repo.
+# Render blueprint for the Voyager API (the web app deploys separately, e.g. on Vercel).
 #
-# PLAN SIZING — read before changing:
-#   The process holds torch, a 384-dim embedding model, a cross-encoder
-#   reranker and an 8k-vector Chroma index in memory. Measured resident set is
-#   ~1.5 GB, so the 512 MB Starter instance WILL be OOM-killed mid-request.
-#   `standard` (2 GB) is the smallest plan that actually runs this.
-#
-#   If you need it cheaper, set RERANK_ENABLED=false — that drops the
-#   cross-encoder (~400 MB) but also disables the grounding gate, so the app
-#   goes back to returning the least-bad passage for unknown destinations.
-#   Prefer paying for RAM over losing the gate.
-# ============================================================
-
+# Memory (measured locally, see apps/api/README.md): with the embedded Qdrant index the API peaks
+# around 0.7 GB, so the 512 MB free/starter instances are too small for that mode. To fit 512 MB:
+#   1. create a free Qdrant Cloud cluster, set QDRANT_URL / QDRANT_API_KEY
+#   2. copy the index once from a dev machine:  python -m voyager.rag.ingest --copy-to "$QDRANT_URL"
+#   3. build with BUILD_INDEX=0 (below) - the in-process index (~210 MB) disappears
+#   optional: VOYAGER_RERANK=false saves another ~95 MB (quality trade-off, see docs/eval-results.md)
 services:
   - type: web
-    name: travel-planner
+    name: voyager-api
     runtime: docker
-    dockerfilePath: ./Dockerfile
-    plan: standard          # 2 GB RAM — see PLAN SIZING above
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: .
+    plan: free
     region: oregon
-    healthCheckPath: /_stcore/health
-
+    healthCheckPath: /health
+    autoDeploy: true
+    buildFilter:
+      paths: ["apps/api/**", "data/corpus.jsonl", "render.yaml"]
     envVars:
-      # ── Required ────────────────────────────────────────
+      - key: BUILD_INDEX
+        value: "0"
       - key: GROQ_API_KEY
-        sync: false          # set in the Render dashboard, never in git
-
-      # ── Model ───────────────────────────────────────────
-      - key: LLM_MODEL
-        value: openai/gpt-oss-120b
-      - key: LLM_TEMPERATURE
-        value: "0.3"
-      - key: LLM_MAX_TOKENS
-        value: "4096"
-
-      # ── Observability (optional; omit to disable tracing) ─
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
       - key: LANGFUSE_PUBLIC_KEY
         sync: false
       - key: LANGFUSE_SECRET_KEY
         sync: false
-      - key: LANGFUSE_HOST_URL
-        value: https://us.cloud.langfuse.com
-
-      # ── External data APIs ──────────────────────────────
-      # Leave unset and every tool returns fixture data. The UI labels those
-      # sections "mock" and lowers the plan's confidence, so an unset key is
-      # visible rather than silent — but the plan is illustrative, not real.
-      - key: OPENWEATHER_API_KEY
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
+      - key: WEB_ORIGIN
         sync: false
-      - key: GOOGLE_MAPS_API_KEY
-        sync: false
-      - key: AMADEUS_API_KEY
-        sync: false
-      - key: AMADEUS_API_SECRET
-        sync: false
-
-      # ── RAG ─────────────────────────────────────────────
-      - key: CHROMA_PERSIST_DIR
-        value: /app/chroma_db      # baked into the image at build time
-      - key: EMBEDDING_MODEL
-        value: sentence-transformers/all-MiniLM-L6-v2
-      - key: RAG_TOP_K
-        value: "5"
-      - key: RERANK_ENABLED
-        value: "true"
-      - key: RERANK_MIN_SCORE
-        value: "-8.0"
-
-      # Keep the model cache on the image, not the ephemeral home dir.
-      - key: HF_HOME
-        value: /app/.cache/huggingface
-
-      # ── Guardrails ──────────────────────────────────────
-      - key: MAX_BUDGET_USD
-        value: "100000"
-      - key: MIN_TRIP_DAYS
+      - key: PUBLIC_BASE_URL
+        sync: false            # https://<service>.onrender.com (the A2A agent card advertises it)
+      - key: VOYAGER_USER_AGENT
+        sync: false            # include your repo URL (Wikimedia requires one)
+      - key: VOYAGER_EMBED_THREADS
         value: "1"
-      - key: MAX_TRIP_DAYS
-        value: "90"

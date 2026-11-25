@@ -1,50 +1,63 @@
-# Local run. For hosted deploys see render.yaml and DEPLOY.md.
+# Voyager v2 local stack:  docker compose up --build
+#   api     FastAPI + LangGraph (embedded Qdrant index baked into the image)   http://localhost:8000
+#   budget  the A2A Budget Analyst as its own service (the api calls it over HTTP)   http://localhost:9101
+#   web     Next.js workspace (apps/web)                                          http://localhost:3000
+#   qdrant  optional Qdrant server:  docker compose --profile qdrant up
+#           then set QDRANT_URL=http://qdrant:6333 for the api and copy the index once with
+#           docker compose exec api python -m voyager.rag.ingest --copy-to http://qdrant:6333
 #
-# The vector index is built INTO the image from data/corpus.jsonl, so there is
-# no chroma volume here on purpose — mounting a host-built index over it is
-# how you get an unreadable store and silently dead dense retrieval.
+# Secrets come from apps/api/.env (never committed; see apps/api/.env.example).
+
+x-api-image: &api-image
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+  image: voyager-api:local
 
 services:
-  travel-planner:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: travel-planner-app
-    ports:
-      - "8501:8501"
+  api:
+    <<: *api-image
+    env_file: [apps/api/.env]
     environment:
-      # Required. Everything else has a default or degrades to fixture data.
-      - GROQ_API_KEY=${GROQ_API_KEY:?GROQ_API_KEY must be set}
-
-      - LLM_MODEL=${LLM_MODEL:-openai/gpt-oss-120b}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
-      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
-
-      # Unset keys make the matching tool return fixtures. The UI labels those
-      # sections "mock" and lowers the plan's confidence.
-      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
-      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
-      - AMADEUS_API_KEY=${AMADEUS_API_KEY:-}
-      - AMADEUS_API_SECRET=${AMADEUS_API_SECRET:-}
-
-      # Omit the Langfuse keys to run with tracing disabled.
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - LANGFUSE_HOST_URL=${LANGFUSE_HOST_URL:-https://us.cloud.langfuse.com}
-
-      - CHROMA_PERSIST_DIR=/app/chroma_db
-      - RERANK_ENABLED=${RERANK_ENABLED:-true}
-      - RERANK_MIN_SCORE=${RERANK_MIN_SCORE:--8.0}
-
-      - PORT=8501
-      - DEBUG=False
+      PORT: "8000"
+      PUBLIC_BASE_URL: http://api:8000
+      A2A_BUDGET_URL: http://budget:9101
+      WEB_ORIGIN: http://localhost:3000
+      QDRANT_URL: ${QDRANT_URL:-}
+    ports: ["8000:8000"]
+    volumes: ["voyager-data:/app/data"]
+    depends_on: [budget]
     restart: unless-stopped
-
-    # Matches the ~1.5 GB resident set of torch + embedder + reranker + index.
-    # Below this the container is OOM-killed part-way through a plan.
     deploy:
       resources:
-        limits:
-          memory: 3G
-        reservations:
-          memory: 2G
+        limits: { memory: 1G }
+
+  budget:
+    <<: *api-image
+    command: ["python", "-m", "voyager.a2a.budget_server", "--host", "0.0.0.0", "--port", "9101"]
+    environment:
+      A2A_PUBLIC_URL: http://budget:9101
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      VOYAGER_INGEST_ON_BOOT: "false"
+    ports: ["9101:9101"]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: apps/web          # Dockerfile owned by the web app
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.5
+    profiles: [qdrant]
+    ports: ["6333:6333"]
+    volumes: ["qdrant-data:/qdrant/storage"]
+
+volumes:
+  voyager-data:
+  qdrant-data:

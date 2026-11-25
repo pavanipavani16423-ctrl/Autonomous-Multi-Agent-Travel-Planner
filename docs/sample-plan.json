@@ -1,0 +1,1109 @@
+{
+  "trip_id": "093c5530a71e",
+  "revision": 0,
+  "request": {
+    "origin": "Mumbai",
+    "destination": "Kyoto",
+    "start_date": "2026-12-03",
+    "end_date": "2026-12-06",
+    "adults": 2,
+    "children": 0,
+    "budget": 3800.0,
+    "currency": "USD",
+    "interests": [
+      "temples",
+      "food",
+      "nature"
+    ],
+    "pace": "balanced",
+    "diet": [
+      "vegetarian"
+    ],
+    "stay_style": "mid",
+    "notes": "First time in Japan; we enjoy quiet gardens and tea.",
+    "client_id": "demo-client"
+  },
+  "title": "4 days in Kyoto",
+  "summary": "Kyoto offers a harmonious blend of historic temples, vibrant food culture, and serene natural spots, making it ideal for travelers seeking a balanced pace. From iconic gardens to local culinary delights, the city invites exploration at a leisurely rhythm.",
+  "destination": {
+    "name": "Kyoto",
+    "country": "Japan",
+    "location": {
+      "lat": 35.02107,
+      "lon": 135.75385
+    },
+    "image": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Kiyomizu-dera%2C_Kyoto%2C_November_2016_-02.jpg/1280px-Kiyomizu-dera%2C_Kyoto%2C_November_2016_-02.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+    "blurb": "Kyoto offers a harmonious blend of historic temples, vibrant food culture, and serene natural spots, making it ideal for travelers seeking a balanced pace. From iconic gardens to local culinary delights, the city invites exploration at a leisurely rhythm."
+  },
+  "weather_overview": "4-18°C; wet on Fri 04 Dec, Sat 05 Dec, so those days lean indoors.",
+  "days": [
+    {
+      "day": 1,
+      "date": "2026-12-03",
+      "title": "Arrival & Eastern Temples",
+      "theme": "Temples & Gardens",
+      "weather": {
+        "date": "2026-12-03",
+        "t_min": 8.0,
+        "t_max": 17.4,
+        "precip_mm": 0.0,
+        "precip_prob": 12.0,
+        "code": 3,
+        "summary": "Overcast",
+        "provenance": "live"
+      },
+      "activities": [
+        {
+          "id": "d1-1",
+          "slot": "morning",
+          "time": "09:00",
+          "duration_min": 120,
+          "title": "Visit Ginkaku-ji Temple",
+          "description": "Explore the Zen temple famed for its moss garden and seasonal blossoms.",
+          "place": "Ginkaku-ji temple",
+          "location": {
+            "lat": 35.0269,
+            "lon": 135.798371
+          },
+          "category": "sight",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": false,
+          "citations": [
+            "wv-4217b522ca",
+            "osm-way-105817561"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d1-2",
+          "slot": "afternoon",
+          "time": "13:00",
+          "duration_min": 90,
+          "title": "Stroll Kōdai-ji Park",
+          "description": "Enjoy a peaceful walk among seasonal flora in this quiet park adjacent to the temple complex.",
+          "place": "Kōdai-ji Park",
+          "location": {
+            "lat": 34.999742,
+            "lon": 135.78003
+          },
+          "category": "nature",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": false,
+          "citations": [
+            "osm-way-527257237"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d1-3",
+          "slot": "evening",
+          "time": "18:30",
+          "duration_min": 90,
+          "title": "Dinner at Rengetsu Chaya",
+          "description": "Savor tofu‑based vegetarian dishes in a traditional setting.",
+          "place": "Tofu restaurant Rengetsu Chaya",
+          "location": {
+            "lat": 35.006755,
+            "lon": 135.782322
+          },
+          "category": "food",
+          "cost": {
+            "amount": 30.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-node-14321344201"
+          ],
+          "tip": null
+        }
+      ],
+      "day_cost": {
+        "amount": 30.0,
+        "currency": "USD"
+      },
+      "walking_km": 5.5
+    },
+    {
+      "day": 2,
+      "date": "2026-12-04",
+      "title": "Cultural Day Indoors",
+      "theme": "Museums & Cafés",
+      "weather": {
+        "date": "2026-12-04",
+        "t_min": 9.3,
+        "t_max": 18.3,
+        "precip_mm": 4.8,
+        "precip_prob": 16.0,
+        "code": 53,
+        "summary": "Drizzle",
+        "provenance": "live"
+      },
+      "activities": [
+        {
+          "id": "d2-1",
+          "slot": "morning",
+          "time": "09:30",
+          "duration_min": 120,
+          "title": "Kyoto International Manga Museum",
+          "description": "Browse collections of manga art and history, a fun indoor cultural experience.",
+          "place": "Kyoto International Manga Museum",
+          "location": {
+            "lat": 35.011696,
+            "lon": 135.759176
+          },
+          "category": "culture",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-way-314446153"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d2-2",
+          "slot": "afternoon",
+          "time": "12:30",
+          "duration_min": 90,
+          "title": "Lunch at Cafe Kitsune",
+          "description": "Relax with coffee and light vegetarian bites in a stylish café.",
+          "place": "Cafe Kitsune",
+          "location": {
+            "lat": 35.009598,
+            "lon": 135.760105
+          },
+          "category": "food",
+          "cost": {
+            "amount": 30.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-node-10844279753"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d2-3",
+          "slot": "afternoon",
+          "time": "14:30",
+          "duration_min": 120,
+          "title": "The Museum of Kyoto",
+          "description": "Discover Kyoto’s history through engaging indoor exhibits.",
+          "place": "The Museum of Kyoto",
+          "location": {
+            "lat": 35.00949,
+            "lon": 135.762313
+          },
+          "category": "culture",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-way-352042994"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d2-4",
+          "slot": "evening",
+          "time": "18:00",
+          "duration_min": 90,
+          "title": "Explore Kyoto Railway Museum",
+          "description": "Interactive displays about Japan’s railway heritage, all indoors.",
+          "place": "Kyoto Railway Museum",
+          "location": {
+            "lat": 34.986489,
+            "lon": 135.742696
+          },
+          "category": "activity",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-way-290375264"
+          ],
+          "tip": null
+        }
+      ],
+      "day_cost": {
+        "amount": 30.0,
+        "currency": "USD"
+      },
+      "walking_km": 4.6
+    },
+    {
+      "day": 3,
+      "date": "2026-12-05",
+      "title": "Traditional Crafts & Imperial Grounds",
+      "theme": "Art & History",
+      "weather": {
+        "date": "2026-12-05",
+        "t_min": 9.5,
+        "t_max": 16.9,
+        "precip_mm": 4.2,
+        "precip_prob": 18.0,
+        "code": 53,
+        "summary": "Drizzle",
+        "provenance": "live"
+      },
+      "activities": [
+        {
+          "id": "d3-1",
+          "slot": "morning",
+          "time": "09:00",
+          "duration_min": 120,
+          "title": "Kyoto Museum of Traditional Crafts",
+          "description": "Hands‑on exhibits showcasing Kyoto’s historic artisanship.",
+          "place": "Kyoto Museum of Traditional Crafts",
+          "location": {
+            "lat": 35.012716,
+            "lon": 135.781016
+          },
+          "category": "culture",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-node-1422965148"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d3-2",
+          "slot": "afternoon",
+          "time": "12:30",
+          "duration_min": 90,
+          "title": "Lunch at Itadakizen Kyoto Vegan Restaurant",
+          "description": "Enjoy a fully vegan menu with local ingredients.",
+          "place": "Itadakizen Kyoto Vegan Restaurant",
+          "location": {
+            "lat": 35.023962,
+            "lon": 135.738763
+          },
+          "category": "food",
+          "cost": {
+            "amount": 30.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-node-7686895186"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d3-3",
+          "slot": "afternoon",
+          "time": "14:30",
+          "duration_min": 120,
+          "title": "The National Museum of Modern Art, Kyoto",
+          "description": "Explore modern Japanese art in a spacious indoor gallery.",
+          "place": "The National Museum of Modern Art, Kyoto",
+          "location": {
+            "lat": 35.012315,
+            "lon": 135.781959
+          },
+          "category": "culture",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-way-100398402"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d3-4",
+          "slot": "evening",
+          "time": "18:30",
+          "duration_min": 90,
+          "title": "Walk through Kyoto Imperial Palace Park",
+          "description": "Evening stroll in the historic park surrounding the Imperial Palace.",
+          "place": "Kyoto Imperial Palace Park",
+          "location": {
+            "lat": 35.024093,
+            "lon": 135.763238
+          },
+          "category": "nature",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": false,
+          "citations": [
+            "osm-relation-7925368"
+          ],
+          "tip": "Dress warmly as temperatures drop."
+        }
+      ],
+      "day_cost": {
+        "amount": 30.0,
+        "currency": "USD"
+      },
+      "walking_km": 13.4
+    },
+    {
+      "day": 4,
+      "date": "2026-12-06",
+      "title": "Southern Charm & Farewell Meal",
+      "theme": "Nature & Cuisine",
+      "weather": {
+        "date": "2026-12-06",
+        "t_min": 3.6,
+        "t_max": 13.2,
+        "precip_mm": 0.0,
+        "precip_prob": 31.0,
+        "code": 3,
+        "summary": "Overcast",
+        "provenance": "live"
+      },
+      "activities": [
+        {
+          "id": "d4-1",
+          "slot": "morning",
+          "time": "09:30",
+          "duration_min": 120,
+          "title": "Maruyama Park Walk",
+          "description": "Leisurely walk in the popular park, enjoying autumn foliage and open spaces.",
+          "place": "Maruyama Park",
+          "location": {
+            "lat": 35.003762,
+            "lon": 135.781476
+          },
+          "category": "nature",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": false,
+          "citations": [
+            "osm-way-54170783"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d4-2",
+          "slot": "afternoon",
+          "time": "12:30",
+          "duration_min": 90,
+          "title": "Visit To-ji Temple",
+          "description": "Explore the historic Buddhist temple and its iconic pagoda.",
+          "place": "To-ji Temple",
+          "location": {
+            "lat": 34.980631,
+            "lon": 135.747719
+          },
+          "category": "sight",
+          "cost": {
+            "amount": 0.0,
+            "currency": "USD"
+          },
+          "indoor": false,
+          "citations": [
+            "osm-way-359896810"
+          ],
+          "tip": null
+        },
+        {
+          "id": "d4-3",
+          "slot": "evening",
+          "time": "18:30",
+          "duration_min": 90,
+          "title": "Dinner at Shabu Zen Restaurant",
+          "description": "Enjoy vegetarian shabu‑shabu in a cozy setting to end the trip.",
+          "place": "Shabu Zen Restaurant",
+          "location": {
+            "lat": 35.003709,
+            "lon": 135.773927
+          },
+          "category": "food",
+          "cost": {
+            "amount": 30.0,
+            "currency": "USD"
+          },
+          "indoor": true,
+          "citations": [
+            "osm-node-6338354287"
+          ],
+          "tip": null
+        }
+      ],
+      "day_cost": {
+        "amount": 30.0,
+        "currency": "USD"
+      },
+      "walking_km": 9.8
+    }
+  ],
+  "stays": [
+    {
+      "name": "Super Hotel Kyoto Shijokawaramachi",
+      "kind": "hotel",
+      "area": "中京区",
+      "location": {
+        "lat": 35.005195,
+        "lon": 135.767607
+      },
+      "price_per_night": {
+        "amount": 120.0,
+        "currency": "USD"
+      },
+      "rating": null,
+      "why": "Central location with business amenities",
+      "provenance": "live",
+      "url": "https://www.openstreetmap.org/node/11813705770",
+      "citations": [
+        "wv-7eef2fd02a",
+        "osm-node-11813705770"
+      ]
+    },
+    {
+      "name": "鈴 プレミアム 二条城北（Rinn Premium Nijo Castle North）",
+      "kind": "hotel",
+      "area": "上京区",
+      "location": {
+        "lat": 35.017467,
+        "lon": 135.7475
+      },
+      "price_per_night": {
+        "amount": 120.0,
+        "currency": "USD"
+      },
+      "rating": null,
+      "why": "Close to Nijo Castle, mid‑range comfort",
+      "provenance": "live",
+      "url": "https://rinn-kyomachi.com/en/list/rinn-premium-nijo-castle-north/",
+      "citations": [
+        "wv-7eef2fd02a",
+        "osm-way-548247489"
+      ]
+    },
+    {
+      "name": "Guesthouse 百万遍Cross",
+      "kind": "guest_house",
+      "area": "左京区",
+      "location": {
+        "lat": 35.029438,
+        "lon": 135.777759
+      },
+      "price_per_night": {
+        "amount": 90.0,
+        "currency": "USD"
+      },
+      "rating": null,
+      "why": "Affordable, authentic Kyoto experience",
+      "provenance": "live",
+      "url": "https://www.gh100manben.jp/",
+      "citations": [
+        "wv-7eef2fd02a",
+        "osm-node-2758064502"
+      ]
+    }
+  ],
+  "food": [
+    {
+      "name": "Tofu restaurant Rengetsu Chaya",
+      "cuisine": "tofu",
+      "area": "Higashiyama Ward",
+      "location": {
+        "lat": 35.006755,
+        "lon": 135.782322
+      },
+      "price_level": 2,
+      "must_try": "Tofu Sashimi",
+      "diet_ok": [
+        "vegetarian"
+      ],
+      "provenance": "live",
+      "citations": [
+        "wv-2e68252801",
+        "osm-node-14321344201"
+      ]
+    },
+    {
+      "name": "Itadakizen Kyoto Vegan Restaurant",
+      "cuisine": "vegan",
+      "area": "Kamigyō Ward",
+      "location": {
+        "lat": 35.023962,
+        "lon": 135.738763
+      },
+      "price_level": 3,
+      "must_try": "Vegan Kaiseki",
+      "diet_ok": [
+        "vegan",
+        "vegetarian"
+      ],
+      "provenance": "live",
+      "citations": [
+        "wv-2e68252801",
+        "osm-node-7686895186"
+      ]
+    },
+    {
+      "name": "Shabu Zen Restaurant",
+      "cuisine": "shabu-shabu",
+      "area": "Higashiyama Ward",
+      "location": {
+        "lat": 35.003709,
+        "lon": 135.773927
+      },
+      "price_level": 3,
+      "must_try": "Vegetarian Shabu Shabu Set",
+      "diet_ok": [
+        "vegetarian"
+      ],
+      "provenance": "live",
+      "citations": [
+        "wv-2e68252801",
+        "osm-node-6338354287"
+      ]
+    },
+    {
+      "name": "Cafe Kitsune",
+      "cuisine": "cafe",
+      "area": "Nakagyō Ward",
+      "location": {
+        "lat": 35.009598,
+        "lon": 135.760105
+      },
+      "price_level": 2,
+      "must_try": "Matcha Latte",
+      "diet_ok": [
+        "vegetarian"
+      ],
+      "provenance": "live",
+      "citations": [
+        "wv-1dc0a8506a",
+        "osm-node-10844279753"
+      ]
+    },
+    {
+      "name": "Cafe Gallery SUN",
+      "cuisine": "cafe",
+      "area": "Shimogyo Ward",
+      "location": {
+        "lat": 34.998717,
+        "lon": 135.766194
+      },
+      "price_level": 2,
+      "must_try": "Yatsuhashi (raw)",
+      "diet_ok": [
+        "vegetarian"
+      ],
+      "provenance": "live",
+      "citations": [
+        "wv-110f164e44",
+        "wv-92703d12fb",
+        "osm-node-12148026602"
+      ]
+    }
+  ],
+  "budget": {
+    "total": {
+      "amount": 3350.12,
+      "currency": "USD"
+    },
+    "limit": {
+      "amount": 3800.0,
+      "currency": "USD"
+    },
+    "per_person": {
+      "amount": 1675.06,
+      "currency": "USD"
+    },
+    "lines": [
+      {
+        "category": "stay",
+        "amount": {
+          "amount": 360.0,
+          "currency": "USD"
+        },
+        "note": "3 nights at the median of 3 suggested stays (estimated nightly rate)"
+      },
+      {
+        "category": "food",
+        "amount": {
+          "amount": 440.0,
+          "currency": "USD"
+        },
+        "note": "mid eating for 2 over 4 days (curated daily band, estimate)"
+      },
+      {
+        "category": "activities",
+        "amount": {
+          "amount": 120.0,
+          "currency": "USD"
+        },
+        "note": "sum of the itinerary's activity prices"
+      },
+      {
+        "category": "transport",
+        "amount": {
+          "amount": 120.0,
+          "currency": "USD"
+        },
+        "note": "local transport, daily band (estimate)"
+      },
+      {
+        "category": "travel",
+        "amount": {
+          "amount": 2090.95,
+          "currency": "USD"
+        },
+        "note": "round trip to the destination (rough estimate)"
+      },
+      {
+        "category": "misc",
+        "amount": {
+          "amount": 219.17,
+          "currency": "USD"
+        },
+        "note": "7% buffer: SIM, tips, small purchases"
+      }
+    ],
+    "within_budget": true,
+    "utilisation": 0.882,
+    "savings_tips": [
+      "Comfortably within budget: about 450 USD of headroom (88% used).",
+      "Keep ~10% aside for surprises (taxis in the rain, entry fees that changed)."
+    ],
+    "analyst": "budget-analyst (A2A)"
+  },
+  "pre_trip": {
+    "getting_there": {
+      "mode": "flight",
+      "duration": "~11.0 h each way",
+      "cost": {
+        "amount": 2090.95,
+        "currency": "USD"
+      },
+      "note": "Fly from Mumbai to Kansai International Airport (KIX) in Osaka Bay. From KIX, board the Haruka limited express to Kyoto Station.\n\nCitations: [wv-04c7d000a4] Round trip for 2, rough estimate from ~6370 km distance."
+    },
+    "getting_around": "Take the Haruka limited express from Kansai International Airport (KIX) to Kyoto Station, or use the Nankai Railway Kyoto Access Ticket for a discounted ride to Tengachaya and onward to central Kyoto. Once in Kyoto, use the Kyoto Sightseeing Card for unlimited subway and bus travel, or hop on the Raku Bus routes 100/101 for quick tourist spots.\n\nCitations: [wv-04c7d000a4], [wv-408983d1ee], [wv-9fb915c77a], [wv-fae2418d83]",
+    "visa": "Travelers from India should check the latest visa requirements for Japan on the official Japanese government immigration website. Generally, a short‑term tourist visa is required, but confirm the exact documents, processing time, and any changes due to COVID‑19 or other regulations.\n\nCitations: []",
+    "currency_note": "The Japanese yen (JPY) is the local currency. Use a credit card with no foreign‑transaction fee or withdraw cash at ATMs in Kyoto. Exchange rates fluctuate, so check a reliable source before traveling.\n\nCitations: [] 1 JPY ≈ 0.006303 USD (ECB rate via Frankfurter)",
+    "safety": [
+      "Avoid isolated streets at night",
+      "Keep valuables secure",
+      "Stay hydrated during temple visits"
+    ],
+    "packing": [
+      "Light, warm clothing for December weather",
+      "Comfortable walking shoes",
+      "Universal power adapter",
+      "Travel insurance documents"
+    ],
+    "local_tips": [
+      "Try local kaiseki cuisine",
+      "Use a prepaid IC card for convenient travel",
+      "Respect temple etiquette"
+    ],
+    "best_areas": [
+      "Gion for traditional streets",
+      "Arashiyama for bamboo groves",
+      "Nishiki Market for food"
+    ],
+    "citations": [
+      "wv-04c7d000a4",
+      "wv-408983d1ee",
+      "wv-9fb915c77a",
+      "wv-fae2418d83"
+    ]
+  },
+  "citations": [
+    {
+      "id": "wv-04c7d000a4",
+      "title": "Kyoto — Get in (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "===== By train =====\nYou can fly into Kansai International Airport (KIX IATA) in Osaka Bay and then get a train to Kyoto. Kansai Airport Station is opposite the arrival lobby where the Haruka limited express train, operated by West Japan Railway (JR West), can be caught. The Haru",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-110f164e44",
+      "title": "Kyoto — Eat (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "Yatsuhashi (八ツ橋 or 八つ橋) is a delicious Kyoto snack, made from rice flour and sugar. There are three types of yatsuhashi: baked, raw, and raw with paste inside. The traditional hard yatsuhashi was originally made using cinnamon, and tastes like a crunchy biscuit. This is yatsuhash",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-1dc0a8506a",
+      "title": "Kyoto — Eat (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "=== Matcha ===\nKyoto and the nearby city of Uji are well known for matcha (抹茶 maccha) or green tea, but visitors don't just come to drink the tea; there are a wide variety of matcha-flavored treats. Matcha ice cream is particularly popular, and most places selling ice cream will ",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-2e68252801",
+      "title": "Kyoto — Eat (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "=== Other specialties ===\nOther Kyoto specialties include hamo (a white fish served with ume as sushi), tofu (try places around Nanzenji temple), suppon (an expensive turtle dish), kaiseki-ryori (multi-course chef's choice that can be extremely good and expensive), and vegetarian",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-408983d1ee",
+      "title": "Kyoto — Get in (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "The other train company operating out of Kansai Airport is the Nankai Railway. They offer a discounted ticket if you are interested in traveling to Central Kyoto, called the Kyoto Access Ticket. For ¥1250 this ticket includes a journey on the Nankai Railway Airport service to Ten",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-4217b522ca",
+      "title": "Kyoto — Do (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "Eastern Kyoto is particularly popular during the cherry blossom season. A walk from Nanzen-ji to Ginkaku-ji along the Philosopher's Path, lined with cherry trees, is enjoyable, as there are a variety of temples and shrines to stop at along the way. The garden of the Heian Shrine,",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-7eef2fd02a",
+      "title": "Kyoto — Sleep (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "=== Mid-range ===\nThe boundary between budget and midrange is often unclear, particularly among ryokan.  Hotels in this category are concentrated in Central Kyoto, serving the business market with the typical amenities and close proximity to transportation.\n\n\n=== Splurge ===\n\nSpl",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-92703d12fb",
+      "title": "Kyoto — Eat (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "Soon after came the final evolution: raw yatsuhashi sandwiching sweet red bean paste. The explanatory name, (あん入り生八つ橋, an-iri nama-yatsuhashi), was too long for marketing purposes, so manufacturers began to call it in various trade names. The first to market was Otabe (おたべ). Othe",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-9fb915c77a",
+      "title": "Kyoto — Get around (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "The Kyoto Sightseeing Card can be purchased as a one-day (adults ¥900/children ¥450) or two-day pass (¥1700/¥850). It can be used for unlimited travel on the subway and city buses as well as a part of the Kyoto bus route. The two-day pass has to be used on two consecutive days.\nT",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "wv-fae2418d83",
+      "title": "Kyoto — Get around (Wikivoyage)",
+      "url": "https://en.wikivoyage.org/wiki/Kyoto",
+      "snippet": "Raku Bus - The city has three routes (100, 101, and 102) which are specifically designed for foreign tourists wishing to hit the tourist spots quickly. The buses skip many of the non-tourist stops and are thus a faster way to get from one sight to the next. The Raku Bus #100 and ",
+      "source": "wikivoyage"
+    },
+    {
+      "id": "budget-analyst",
+      "title": "Budget Analyst agent (A2A)",
+      "url": "/a2a/budget/.well-known/agent-card.json",
+      "snippet": "Costed by the remote Budget Analyst agent from curated daily cost bands and the plan's own prices.",
+      "source": "budget-analyst"
+    },
+    {
+      "id": "frankfurter",
+      "title": "ECB reference exchange rates (Frankfurter)",
+      "url": "https://frankfurter.dev/",
+      "snippet": "Daily ECB reference rates.",
+      "source": "frankfurter"
+    },
+    {
+      "id": "open-meteo",
+      "title": "Open-Meteo weather forecast / archive",
+      "url": "https://open-meteo.com/",
+      "snippet": "Daily forecast (16 days) and historical weather from Open-Meteo.",
+      "source": "open-meteo"
+    },
+    {
+      "id": "osm-node-10844279753",
+      "title": "Cafe Kitsune (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/10844279753",
+      "snippet": "cafe at 35.00960, 135.76011 in Nakagyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-11813705770",
+      "title": "Super Hotel Kyoto Shijokawaramachi (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/11813705770",
+      "snippet": "hotel at 35.00520, 135.76761 in 中京区",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-12148026602",
+      "title": "Cafe Gallery SUN (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/12148026602",
+      "snippet": "cafe at 34.99872, 135.76619 in Shimogyo Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-1422965148",
+      "title": "Kyoto Museum of Traditional Crafts (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/1422965148",
+      "snippet": "attraction at 35.01272, 135.78102 in Sakyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-14321344201",
+      "title": "Tofu restaurant Rengetsu Chaya (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/14321344201",
+      "snippet": "restaurant at 35.00675, 135.78232 in Higashiyama Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-2758064502",
+      "title": "Guesthouse 百万遍Cross (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/2758064502",
+      "snippet": "guest_house at 35.02944, 135.77776 in 左京区",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-6338354287",
+      "title": "Shabu Zen Restaurant (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/6338354287",
+      "snippet": "restaurant at 35.00371, 135.77393 in Higashiyama Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-node-7686895186",
+      "title": "Itadakizen Kyoto Vegan Restaurant (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/node/7686895186",
+      "snippet": "restaurant at 35.02396, 135.73876 in Kamigyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-relation-7925368",
+      "title": "Kyoto Imperial Palace Park (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/relation/7925368",
+      "snippet": "park at 35.02409, 135.76324 in Kamigyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-100398402",
+      "title": "The National Museum of Modern Art, Kyoto (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/100398402",
+      "snippet": "attraction at 35.01232, 135.78196 in Sakyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-105817561",
+      "title": "Ginkaku-ji temple (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/105817561",
+      "snippet": "temple at 35.02690, 135.79837 in Sakyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-290375264",
+      "title": "Kyoto Railway Museum (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/290375264",
+      "snippet": "attraction at 34.98649, 135.74270 in Shimogyo Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-314446153",
+      "title": "Kyoto International Manga Museum (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/314446153",
+      "snippet": "attraction at 35.01170, 135.75918 in Nakagyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-352042994",
+      "title": "The Museum of Kyoto (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/352042994",
+      "snippet": "attraction at 35.00949, 135.76231 in Nakagyō Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-359896810",
+      "title": "To-ji Temple (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/359896810",
+      "snippet": "temple at 34.98063, 135.74772 in Minami Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-527257237",
+      "title": "Kōdai-ji Park (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/527257237",
+      "snippet": "park at 34.99974, 135.78003 in Higashiyama Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-54170783",
+      "title": "Maruyama Park (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/54170783",
+      "snippet": "park at 35.00376, 135.78148 in Higashiyama Ward",
+      "source": "openstreetmap"
+    },
+    {
+      "id": "osm-way-548247489",
+      "title": "鈴 プレミアム 二条城北（Rinn Premium Nijo Castle North） (OpenStreetMap)",
+      "url": "https://www.openstreetmap.org/way/548247489",
+      "snippet": "hotel at 35.01747, 135.74750 in 上京区",
+      "source": "openstreetmap"
+    }
+  ],
+  "quality": {
+    "confidence": 0.891,
+    "grounding_coverage": 1.0,
+    "guidebook": "covered",
+    "checks": [
+      {
+        "name": "PII redaction",
+        "passed": true,
+        "detail": "no personal data found"
+      },
+      {
+        "name": "Prompt injection",
+        "passed": true,
+        "detail": "no injection patterns"
+      },
+      {
+        "name": "Scope",
+        "passed": true,
+        "detail": "travel request"
+      },
+      {
+        "name": "Dates & budget",
+        "passed": true,
+        "detail": "valid"
+      },
+      {
+        "name": "Day count",
+        "passed": true,
+        "detail": "4 of 4 days"
+      },
+      {
+        "name": "Dates",
+        "passed": true,
+        "detail": "2026-12-03 to 2026-12-06"
+      },
+      {
+        "name": "Budget fit",
+        "passed": true,
+        "detail": "88% of the limit (allowed up to 110%)"
+      },
+      {
+        "name": "Citation coverage",
+        "passed": true,
+        "detail": "14/14 activities cite evidence"
+      },
+      {
+        "name": "Wrong-city leakage",
+        "passed": true,
+        "detail": "none"
+      },
+      {
+        "name": "Geo sanity",
+        "passed": true,
+        "detail": "14/14 activities mapped, all within 60 km"
+      },
+      {
+        "name": "Pace",
+        "passed": true,
+        "detail": "3-4/day"
+      },
+      {
+        "name": "Weather-aware",
+        "passed": true,
+        "detail": "wet days lean indoors"
+      },
+      {
+        "name": "LLM judge",
+        "passed": false,
+        "detail": "faithfulness 1.00, relevancy 0.40; Too many museum visits; does not align with primary interests in temples, food, and nature"
+      }
+    ],
+    "scores": [
+      {
+        "name": "Faithfulness",
+        "value": 1.0,
+        "rating": "Good",
+        "explain": "LLM judge: 100% of activities are supported by the cited evidence."
+      },
+      {
+        "name": "Answer relevancy",
+        "value": 0.7,
+        "rating": "Good",
+        "explain": "Judge fit 40%, interests covered 100%."
+      },
+      {
+        "name": "Context precision",
+        "value": 0.672,
+        "rating": "OK",
+        "explain": "Across 6 guidebook searches, cited passages ranked first 67% of the time."
+      },
+      {
+        "name": "Citation coverage",
+        "value": 1.0,
+        "rating": "Good",
+        "explain": "22/22 activities, stays and food picks cite a guidebook or map source."
+      },
+      {
+        "name": "Budget fit",
+        "value": 1.0,
+        "rating": "Good",
+        "explain": "Total is 88% of your budget. Within budget."
+      },
+      {
+        "name": "Overall",
+        "value": 0.891,
+        "rating": "Good",
+        "explain": "Weighted mean: faithfulness 25%, relevancy 20%, citations 20%, budget 20%, context precision 15%."
+      }
+    ]
+  },
+  "timings": [
+    {
+      "agent": "guard",
+      "ms": 0
+    },
+    {
+      "agent": "brief",
+      "ms": 119
+    },
+    {
+      "agent": "destination",
+      "ms": 9852
+    },
+    {
+      "agent": "weather",
+      "ms": 821
+    },
+    {
+      "agent": "stays",
+      "ms": 21995
+    },
+    {
+      "agent": "food",
+      "ms": 15356
+    },
+    {
+      "agent": "logistics",
+      "ms": 9061
+    },
+    {
+      "agent": "itinerary",
+      "ms": 4828
+    },
+    {
+      "agent": "budget",
+      "ms": 331
+    },
+    {
+      "agent": "critic",
+      "ms": 1853
+    },
+    {
+      "agent": "finalize",
+      "ms": 16
+    }
+  ],
+  "model": "groq:openai/gpt-oss-120b + openai/gpt-oss-20b",
+  "created_at": "2026-11-23T14:39:38+00:00"
+}

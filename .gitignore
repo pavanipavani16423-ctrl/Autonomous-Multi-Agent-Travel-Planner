@@ -1,50 +1,47 @@
+# --- secrets ---------------------------------------------------------------
 .env
+.env.*
+!.env.example
 .envrc
-
-__pycache__/
-**/__pycache__/
-*.pyc
-
-.venv/
-venv/
-env/
-
-.streamlit/secrets.toml
-
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-
-.ipynb_checkpoints/
-
-build/
-dist/
-*.egg-info/
-
-# Chroma index: a build artefact, rebuilt from data/corpus.jsonl.
-# Never commit it — a store written by a different chromadb version is
-# unreadable and silently breaks dense retrieval.
-chroma_db/
-
-# data/corpus.jsonl IS committed on purpose: it lets the Docker image build
-# the index offline and makes deploys reproducible. Refresh it with
-#   python -m rag.ingest
-
-# Local run history — plans, metrics and graph checkpoints for THIS machine.
-# Not shared state: committing it would push one developer's trip history to
-# everyone, and the schema is recreated automatically on first run.
-data/memory.db
-data/checkpoints.db
-data/*.db
-
-# Superseded UI, kept locally while the redesign settles.
-app_old_backup.py
-
-# Private keys and certificates. A .pem in the working folder is one
-# `git add -A` away from being public, and a leaked key cannot be
-# un-leaked - it has to be revoked and reissued.
 *.pem
 *.key
 *.p12
 *.pfx
 id_rsa*
+
+# --- python ----------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# --- node / next (apps/web) -----------------------------------------------
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- runtime data (rebuilt locally; data/corpus.jsonl IS committed) --------
+data/qdrant/
+data/qdrant-*/
+data/models/
+data/eval/
+data/expanded.jsonl
+data/*.db
+data/*.db-shm
+data/*.db-wal
+*.db
+*.log
+
+# --- editors / OS ------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

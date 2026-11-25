@@ -1,144 +1,144 @@
-# Autonomous Multi-Agent Travel Planner
+# Voyager: a multi-agent AI travel planner
 
-**[▶ Try the live app](https://autonomous-multi-agent-travel-planner-pnmjkcxhpddthjhxeu5nzc.streamlit.app/)**
+Describe a trip in one sentence. A team of AI agents researches it in parallel using **live data
+from MCP tool servers** and a **Qdrant hybrid-RAG guidebook**. A separate **Budget Analyst agent,
+called over the A2A protocol**, costs the plan, and a critic checks it before you see it. The result
+is a day-by-day itinerary with a map, stays, food, budget, a pre-trip checklist, sources and quality
+scores, streamed live into a Next.js workspace. You can refine it by chat or ask the built-in
+assistant about it.
 
-Tell it where you're going, your dates and a budget. A few minutes later you
-get a complete travel plan — a day-by-day itinerary, places to stay, what to
-eat, the weather, and a costed budget — downloadable as a PDF.
+![Voyager landing page](docs/screenshots/landing.png)
 
-Built with LangGraph, Groq, ChromaDB and Streamlit.
-
----
+| Mission control (agents working live) | Trip workspace (itinerary + map) |
+|---|---|
+| ![Mission control](docs/screenshots/mission-control.png) | ![Workspace](docs/screenshots/workspace-map.png) |
+| **AI assistant (grounded in the plan, can propose a change)** | **Budget costed by the A2A agent** |
+| ![Assistant](docs/screenshots/assistant-trip.png) | ![Budget](docs/screenshots/budget.png) |
 
 ## What makes it different
 
-Most LLM travel demos produce a confident plan and give you no way to tell
-which parts are real. This one tells you.
+- **11 agents, 5 running in parallel.** A LangGraph graph fans out to destination, weather, stays,
+  food and logistics specialists at the same time. A 4-day plan takes **~33 s** end to end, compared
+  with 3–5 minutes for the sequential v1.
+- **Live data, clearly labelled.** Three MCP servers (weather, places, money) wrap free live APIs:
+  Open-Meteo, OpenStreetMap and Frankfurter exchange rates. Every hotel, restaurant, forecast and
+  price is tagged `live`, `guidebook`, `estimate`, `cached` or `unavailable`. Estimates are never
+  shown as live.
+- **Agent-to-agent costing.** The Budget Analyst is an independent A2A service with an Agent Card
+  (`/.well-known/agent-card.json`) and JSON-RPC. The planner discovers it and sends it the draft
+  plan. If the analyst is unreachable, a labelled local fallback takes over.
+- **A guidebook that grows itself.** 9,026 Wikivoyage passages for 65 cities sit in Qdrant with dense
+  (bge-small) and sparse (BM25) vectors, RRF fusion, a cross-encoder re-ranker and a destination
+  pre-filter. If you ask for a city it doesn't know, it fetches, embeds and indexes that city on the
+  spot (Hoi An: 72 passages in 11.3 s).
+- **Famous sights first.** Relevance search has no idea what's famous. Voyager ranks a city's
+  guidebook listings by how often the rest of the guide refers to them, so Jaipur's plan opens with
+  Amber Fort and City Palace, not a random garden.
+- **Grounded and checked.** Every activity cites a guidebook passage or an OpenStreetMap record. A
+  critic agent checks day count, dates, budget fit, citation coverage, wrong-city leakage and
+  geography, and sends the itinerary back once if anything fails.
+- **Human in the loop.** "Make day 2 more relaxed" re-runs only itinerary → budget → critic from the
+  saved checkpoint. A floating AI assistant answers questions about your plan and can turn a request
+  into a refinement.
+- **Production behaviour.** Guardrails screen inputs (prompt injection, PII redaction, scope, date
+  and budget sanity). Requests are rate-limited per IP. The LLM gateway uses structured output with
+  JSON repair and a token budget per model. When a model's daily quota runs out it switches to the
+  next model instead of failing. Identical trips come from a semantic plan cache (0.7 s).
 
-**It knows when it doesn't know.** The knowledge base covers 53 cities. Ask
-about one it doesn't cover and it says so, rather than quietly answering with
-a *different* city's facts — which is exactly what a plain vector search does,
-because it always returns its nearest matches and has no way to say "nothing
-here is relevant."
+## Architecture
 
-> Measured: **18/18** covered cities correctly grounded · **18/18** uncovered
-> cities correctly refused · **0** wrong-city facts leaked.
-
-**It labels data it made up.** Without API keys the weather and price services
-return sample figures. Every value is stamped `live`, `curated` or `mock`, and
-that stamp follows it to the screen and into the PDF. If part of a plan is
-illustrative, the plan says so and lowers its own confidence to match.
-
-**Its quality is measured, not asserted.** Six automatic pass/fail checks run
-on every plan and block a release if any fail. They have already caught two
-bugs that had been silently broken for weeks.
-
----
-
-## How it works
-
-```
-Trip request
-   ↓
-Is the request sane?  ──no──▶  stop, explain why
-   ↓ yes
-① Search the guidebook   8,161 passages · 53 cities
-     hybrid search, then discard passages about other cities
-   ↓
-② Call live services     weather · maps · hotels · restaurants · flights
-     each answer stamped live / curated / mock
-   ↓
-③ Five specialists       weather → route → hotels → budget → food
-     one AI call each, in dependency order
-   ↓
-Check the work           days match dates? over budget? sections missing?
-   ↓
-Final planner            writes ONLY the summary + confidence
-   ↓
-Plan assembled in Python
-   ↓
-Itinerary on screen + PDF
+```mermaid
+flowchart LR
+  UI["Next.js workspace<br/>SSE · MapLibre · assistant"] -->|REST + SSE| API[FastAPI]
+  API --> G{{LangGraph}}
+  G --> guard --> brief
+  brief --> destination & weather & stays & food & logistics
+  destination & weather & stays & food & logistics --> itinerary
+  itinerary --> budget["budget<br/>(A2A client)"] --> critic
+  critic -- "fails (≤1 retry)" --> itinerary
+  critic --> finalize
+  budget -. "A2A JSON-RPC" .-> BA["Budget Analyst agent<br/>Agent Card"]
+  destination & stays & food & logistics -. hybrid RAG .-> Q[("Qdrant<br/>dense + BM25 + rerank")]
+  weather & stays & food & logistics & brief -. MCP .-> M["MCP servers<br/>weather · places · money"]
+  G -. traces + scores .-> LF[Langfuse]
 ```
 
-A failed step becomes a missing section with an explanation — never a crash.
-
-There's a full architecture diagram in
-[`docs/architecture.html`](docs/architecture.html) (open it in a browser).
-
----
-
-## Documentation
-
-| Document | For |
+| Layer | Choice |
 |---|---|
-| [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md) | The whole system in plain English. Start here. |
-| [`FILES.md`](FILES.md) | What every folder and file is, and how to pull the latest code. |
-| [`CLAUDE.md`](CLAUDE.md) | Technical detail and the traps, for whoever edits the code. |
-| [`DEPLOY.md`](DEPLOY.md) | Hosting notes. |
+| Orchestration | LangGraph `StateGraph`, parallel fan-out, SQLite checkpointer (resumable refinements) |
+| LLMs | Groq `openai/gpt-oss-120b` (itinerary, critic), `openai/gpt-oss-20b` (specialists), automatic fallback chain |
+| Tools | MCP (`mcp` FastMCP) servers over stdio / streamable HTTP, per-agent tool allow-lists |
+| Agent-to-agent | `a2a-sdk` server + client, Agent Card discovery |
+| RAG | Qdrant (embedded or server), fastembed `BAAI/bge-small-en-v1.5` + `Qdrant/bm25`, RRF, MiniLM cross-encoder |
+| Backend | FastAPI, SSE (replay + `Last-Event-ID` resume), SQLAlchemy, Pydantic v2 |
+| Observability | Langfuse v5: one trace per trip with agent, LLM, tool and retriever spans, plus 6 quality scores |
+| Evaluation | Ragas, a retrieval benchmark, deterministic checks, online scores on every run |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4, Motion, MapLibre GL, Recharts |
+| Ops | Docker, docker-compose, GitHub Actions CI, Render (API) + Vercel (web) |
 
----
+## Measured results
 
-## Running it locally
+All numbers come from runs against the real stack. Details are in
+[`docs/eval-results.md`](docs/eval-results.md).
+
+| | Result |
+|---|---|
+| End-to-end plan, 4 days, Kyoto | **32.7 s** (v1: 3–5 min) |
+| Repeat of the same trip | **0.7 s** (plan cache) |
+| Uncovered city (Hoi An) incl. on-demand indexing | 57.6 s, of which 72 passages indexed in 11.3 s |
+| Retrieval MRR@10, 20 labelled queries | BM25 0.85 → dense 0.97 → **hybrid + rerank 1.00** |
+| Wrong-city passages in the top 5 | **0%** with the destination pre-filter (2% without it) |
+| Golden set (10 trips): day count, dates, geography, wrong-city, injection, PII checks | **100%** |
+| Citation coverage (online score, mean) | 0.96 |
+| Offline test suite | 90 tests, no network (`VOYAGER_OFFLINE=1`) |
+
+What still needs work: Ragas faithfulness is **0.26**. The itinerary text still adds the model's
+general knowledge about famous places beyond what the cited passages say. The planned fix is more
+evidence per place and stricter claim checking, and is written up in the eval report.
+
+## Run it locally
 
 ```bash
-pip install -r requirements.txt
-streamlit run app.py
+# API (Python 3.11, uv)
+cd apps/api
+cp .env.example .env                              # add GROQ_API_KEY (Langfuse keys optional)
+uv sync --extra eval
+uv run python -m voyager.rag.ingest --warm        # one-time: download models + index the guidebook
+PORT=8000 uv run uvicorn voyager.main:app --port 8000
+
+# Web
+cd apps/web
+npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev   # http://localhost:3000
 ```
 
-Create a `.env` file with one required line:
+With no backend running, `/trip/demo` replays a real recorded run.
 
-```
-GROQ_API_KEY=your_key_from_console.groq.com
-LLM_MODEL=openai/gpt-oss-120b
-```
-
-The first start takes ~5 extra minutes while it builds the search index from
-`data/corpus.jsonl` (the 53 city guides, already in the repo). That happens
-once and needs no internet. Every start after that is fast.
-
-Weather, maps, hotel and flight keys are optional — without them those
-sections use clearly-labelled sample data.
-
-### Useful commands
+Useful commands:
 
 ```bash
-python -m rag.ingest --list        # which cities are covered
-python -m rag.ingest --cities X    # add a city (keeps the existing ones)
-python -m rag.ingest --check       # prove the wrong-city filter works
-python -m rag.ingest --backlog     # cities users wanted that we lack
-python -m eval.harness             # the six checks — PASS or FAIL
-python -m eval.harness --ragas     # plus RAGAS retrieval scoring
+VOYAGER_OFFLINE=1 uv run pytest -q                       # offline test suite
+uv run python -m voyager.eval.run                        # Ragas + retrieval + checks → docs/eval-results.md
+uv run python -m voyager.a2a.budget_server --port 9101   # run the A2A agent standalone
+uv run python -m voyager.mcp.servers.weather --transport streamable-http   # any MCP server standalone
 ```
 
----
+## Repository
 
-## Built with
+```
+apps/api/voyager/   graph/ (agents) · mcp/ (3 servers + hub) · a2a/ (Budget Analyst) · rag/ (Qdrant)
+                    guardrails/ · llm/ (gateway) · memory/ · observability/ · eval/ · api/ · services/
+apps/web/           app/ (pages) · components/ (landing, composer, trip workspace, assistant) · lib/
+data/corpus.jsonl   Wikivoyage guidebook (CC BY-SA)
+docs/               SPEC.md (API contract) · eval-results.md · sample-plan.json · screenshots/
+```
 
-**LangGraph** state machine · **Groq** (`openai/gpt-oss-120b`) ·
-**ChromaDB** + **BM25** hybrid retrieval · **Wikivoyage** knowledge base ·
-**Pydantic** schemas · **Langfuse** tracing · **RAGAS** evaluation ·
-**Streamlit** UI · **ReportLab** PDF export · **SQLite** memory
-
----
-
-## Known limits
-
-Worth knowing before you try it:
-
-- **A plan takes 3–5 minutes.** Seven AI calls run in sequence.
-- **The free Groq tier allows roughly 10 plans a day.** Identical trips are
-  cached and return instantly at no cost.
-- **The hosted app forgets on restart.** Plan history and cache reset when the
-  free instance sleeps.
-- **Retrieval is stronger than generation.** The right passages are provably
-  retrieved, but the agents lean more on the model's own knowledge than on
-  them. Measured and documented in `HOW-IT-WORKS.md` — it's the next thing to
-  improve.
-
----
+v1 (the Streamlit version) is preserved at tag [`v1-streamlit`](../../tree/v1-streamlit).
 
 ## Author
 
-**Pavani** — Artificial Intelligence, Multi-Agent Systems and Generative AI.
+**Pavani B**, AI Engineer:
+[LinkedIn](https://linkedin.com/in/pavani-buchipalli-aba64b2b1) ·
+[GitHub](https://github.com/pavanipavani16423-ctrl)
 
-⭐ If you found this interesting, consider starring the repo.
+Guidebook text: Wikivoyage contributors, CC BY-SA 4.0. Map data: © OpenStreetMap contributors.
