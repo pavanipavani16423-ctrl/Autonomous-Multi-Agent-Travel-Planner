@@ -15,10 +15,10 @@ WORKDIR /app/api
 
 # dependencies first (cached layer); no dev tools, no Ragas in the runtime image
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --extra postgres --no-install-project
 
 COPY apps/api/voyager ./voyager
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra postgres
 
 COPY data/corpus.jsonl /app/data/corpus.jsonl
 # the sample trip the web app replays at /trip/demo, so the assistant can answer about it too

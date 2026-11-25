@@ -35,7 +35,7 @@ class ParseDraft(BaseModel):
 SYSTEM = (
     "Extract a trip request from the traveller's message. Resolve relative dates ('next Friday', "
     "'in two weeks', 'mid-December') against TODAY. Only fill fields the message states or clearly implies; "
-    "leave the rest null. interests from: food, temples, nature, nightlife, art, shopping, history, adventure. "
+    "leave the rest null. 'for 2' / 'for two' / 'a couple' means adults=2. interests from: food, temples, nature, nightlife, art, shopping, history, adventure. "
     "diet from: vegetarian, vegan, halal, jain, kosher, gluten-free.")
 
 CURRENCY_SIGNS = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "₹": "INR", "rs": "INR", "inr": "INR",
@@ -77,6 +77,10 @@ def regex_parse(text: str, today: date) -> ParseDraft:
         adults = int(m.group(1)) if m.group(1).isdigit() else WORD_NUM[m.group(1)]
     elif re.search(r"\b(couple|my (wife|husband|partner)|two of us)\b", t):
         adults = 2
+    else:  # "for 2", "for two" (but not "for 4 days" or "for 40,000")
+        m = re.search(r"\bfor\s+(\d{1,2}|two|three|four|five|six)\b(?!\d|[.,]\d)(?!\s*(?:day|night|week|k\b|lakh))", t)
+        if m:
+            adults = int(m.group(1)) if m.group(1).isdigit() else WORD_NUM[m.group(1)]
     start = None
     if "next week" in t:
         start = today + timedelta(days=7 - today.weekday())
@@ -127,7 +131,7 @@ async def parse_text(text: str, profile: dict[str, Any] | None = None, today: da
     if (end - start).days > 13:
         end = start + timedelta(days=13)
     currency = (draft.currency or defaults.get("currency") or "USD").upper()[:3]
-    adults = max(1, draft.adults or 1)
+    adults = max(1, draft.adults or regex_parse(clean, today).adults or 1)
     n_days = (end - start).days + 1
     budget = draft.budget or _default_budget(currency, n_days, adults)
     pace = draft.pace if draft.pace in ("relaxed", "balanced", "packed") else defaults.get("pace", "balanced")

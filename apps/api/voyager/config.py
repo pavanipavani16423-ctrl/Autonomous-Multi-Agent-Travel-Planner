@@ -119,6 +119,13 @@ class Settings(BaseSettings):
                 url = "postgresql+asyncpg://" + url[len("postgres://"):]
             elif url.startswith("postgresql://"):
                 url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+            if url.startswith("postgresql+asyncpg://") and "?" in url:
+                # hosted Postgres (Neon, Supabase) hands out libpq-style params that asyncpg rejects
+                base, _, query = url.partition("?")
+                params = [p for p in query.split("&") if p and not p.startswith(("sslmode=", "channel_binding="))]
+                if "sslmode=require" in query or "sslmode=verify" in query:
+                    params.append("ssl=require")
+                url = base + ("?" + "&".join(params) if params else "")
             return url
         name = "voyager-test.db" if self.offline else "voyager.db"
         return f"sqlite+aiosqlite:///{(self.data_dir / name).as_posix()}"

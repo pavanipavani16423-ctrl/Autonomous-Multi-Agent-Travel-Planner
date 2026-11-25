@@ -87,7 +87,8 @@ export function Workspace({
   const [seen, setSeen] = useState(plan);
   const [changed, setChanged] = useState<Set<string>>(new Set());
   if (seen !== plan) {
-    const diff = seen.revision !== plan.revision ? diffActivities(seen, plan) : new Set<string>();
+    // The same revision can arrive twice (live `plan` event, then a refetch): keep the badges then.
+    const diff = seen.revision !== plan.revision ? diffActivities(seen, plan) : changed;
     setSeen(plan);
     setChanged(diff);
     if (seen.revision !== plan.revision) {
